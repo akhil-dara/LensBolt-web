@@ -22,6 +22,7 @@ committed. Without an APK the landing says "Coming to Google Play" and /receive 
 """
 import argparse
 import base64
+import datetime
 import hashlib
 import html
 import json
@@ -44,7 +45,44 @@ SINGLE = webbuild.SINGLE
 MAX_FILE = 25 * 1024 * 1024      # Cloudflare Pages' per-file limit
 MAX_FILES = 20000                # and its file count limit (free tier)
 MAX_HEADER_LINE = 2000           # and the longest line _headers may have
+SITE_URL = "https://lensbolt.com"
+AUTHOR = {"name": "Akhil Dara", "url": "https://github.com/akhil-dara"}
+REPOS = ["https://github.com/akhil-dara/lensbolt-core", "https://github.com/akhil-dara/lensbolt-web", "https://github.com/akhil-dara/lensbolt-android"]
+# the pages a search engine should list beside the landing: their titles and descriptions in search results
+SEO = {
+    "/send": ("Send a file to a phone camera: LensBolt sender", "Send a file from this screen to a phone camera. No cable, no network, no account, and every byte checked with SHA-256."),
+    "/receive": ("Receive a file with your phone camera: LensBolt receiver", "Receive a file from a LensBolt screen with this phone's camera or a webcam. Nothing is uploaded; every byte is checked."),
+    "/privacy": ("Privacy: LensBolt", "LensBolt's privacy policy: the app and the website collect nothing."),
+    "/downloads/": ("Downloads: LensBolt", "LensBolt's sender and receiver as single offline HTML files, and the Android app."),
+}
+# hosts that serve the same files and must not compete with lensbolt.com in search results
+DUPLICATE_HOSTS = ["https://www.lensbolt.com", "https://lensbolt.pages.dev", "https://:version.lensbolt.pages.dev"]
 PAGES_ON_DISK = {"/": "index.html", "/send": "send.html", "/receive": "receive.html", "/privacy": "privacy.html", "/downloads/": "downloads/index.html"}
+
+LLMS = """# LensBolt
+
+> Send a file from any screen to a phone camera. No cable, no network, no account: the file plays on the screen as a moving square of cells (up to 1024 by 1024 pixels, 30 frames a second), and a camera reads it. Every file is checked with SHA-256. Free and open source (AGPL-3.0), by {author}.
+
+## Use it
+
+- [Send a file]({site}/send): the sender, in any current browser.
+- [Receive a file]({site}/receive): the receiver, with a phone camera, a webcam or a shared window.
+- [Downloads]({site}/downloads/): both pages as single offline HTML files.
+- [Android app](https://github.com/akhil-dara/lensbolt-android/releases/latest): the receiver for Android 10 or newer.
+
+## How it works
+
+- The sender splits the file into packets, adds Reed-Solomon error correction and a fountain code, and draws the packets as frames of black-and-white, grey or colour cells.
+- The receiver finds the square by its four corner markers and timing border, corrects tilt, rotation and lens distortion, reads the cells and corrects errors. No particular frame is needed: enough frames rebuild the file.
+- Nothing is uploaded: the pages run entirely in the browser and work offline after the first visit.
+
+## Source
+
+- [lensbolt-core](https://github.com/akhil-dara/lensbolt-core): the codec and decoder (Rust).
+- [lensbolt-web](https://github.com/akhil-dara/lensbolt-web): the sender, the receiver and this site.
+- [lensbolt-android](https://github.com/akhil-dara/lensbolt-android): the Android receiver.
+- [Privacy]({site}/privacy): LensBolt collects nothing.
+"""
 
 _emitted = {}
 _emitting = set()
@@ -168,7 +206,8 @@ def lift_styles(doc):
 
 
 def inline_scripts(doc):
-    return re.findall(r"<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>", doc)
+    # a data block (JSON-LD) is never run: the CSP does not govern it, so it needs no hash
+    return re.findall(r"<script\b(?![^>]*\bsrc=)(?![^>]*application/ld\+json)[^>]*>([\s\S]*?)</script>", doc)
 
 
 def inline_styles(doc):
@@ -260,8 +299,42 @@ BANNER_STYLE = """<style>
 """
 
 
-def app_page(name, out_name, extra_head, after_start=""):
+def seo_head(path, title, description, image):
+    """The canonical address and the social card of one page (every host's copy names lensbolt.com)."""
+    url = SITE_URL + path
+    e = html.escape
+    return (f'<link rel="canonical" href="{url}">\n<meta property="og:type" content="website">\n<meta property="og:site_name" content="LensBolt">\n'
+            f'<meta property="og:url" content="{url}">\n<meta property="og:title" content="{e(title)}">\n<meta property="og:description" content="{e(description)}">\n'
+            f'<meta property="og:image" content="{SITE_URL}{image}">\n<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n'
+            '<meta name="twitter:card" content="summary_large_image">\n')
+
+
+def json_ld(image):
+    """The landing's structured data: the site, its author and the app (free, open source, in a browser and on Android)."""
+    graph = [
+        {"@type": "WebSite", "@id": SITE_URL + "/#website", "url": SITE_URL + "/", "name": "LensBolt", "inLanguage": "en",
+         "description": "Send a file from any screen to a phone camera. No cable, no network, no account.", "publisher": {"@id": SITE_URL + "/#author"}},
+        {"@type": "Person", "@id": SITE_URL + "/#author", "name": AUTHOR["name"], "url": AUTHOR["url"], "sameAs": [AUTHOR["url"]]},
+        {"@type": "WebApplication", "@id": SITE_URL + "/#app", "name": "LensBolt", "url": SITE_URL + "/",
+         "description": "Moves a file from one screen to a camera as a moving pattern of cells: no cable, no network, no account. Every file is checked with SHA-256.",
+         "applicationCategory": "UtilitiesApplication", "operatingSystem": "Any current web browser; Android 10 or newer",
+         "browserRequirements": "JavaScript and WebAssembly; a camera to receive",
+         "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "isAccessibleForFree": True,
+         "license": "https://www.gnu.org/licenses/agpl-3.0.html", "image": SITE_URL + image, "author": {"@id": SITE_URL + "/#author"},
+         "featureList": ["Works with no network connection", "Every file verified with SHA-256", "Receive with a phone camera, a webcam or a shared window",
+                         "Runs in the browser; offline single-file pages", "Open source (AGPL-3.0)"], "sameAs": REPOS},
+    ]
+    body = json.dumps({"@context": "https://schema.org", "@graph": graph}, indent=1, ensure_ascii=False).replace("</", "<\\/")
+    return f'<script type="application/ld+json">\n{body}\n</script>'
+
+
+def app_page(name, out_name, extra_head, after_start="", title=None):
     doc = rewrite_html(read(os.path.join(HERE, name)), HERE, pages={"index.html": "/send", "receive.html": "/receive"})
+    if title:
+        # the hosted copy's title and description are the search result's; the page in the repository keeps its short ones
+        doc, n = re.subn(r"<title>[^<]*</title>", lambda m: f"<title>{html.escape(title[0])}</title>", doc, count=1)
+        doc, k = re.subn(r'<meta name="description" content="[^"]*">', lambda m: f'<meta name="description" content="{html.escape(title[1])}">', doc, count=1)
+        assert n == 1 and k == 1, f"{name}: no title or description to replace"
     left = re.findall(r"""(?:from\s*|import\s*\(\s*|new URL\(\s*)['"`](\.{1,2}/[^'"`]+)""", doc) + re.findall(r'\b(?:src|href)="((?:\./)?(?:assets|pkg)/[^"]+)"', doc)
     assert not left, f"{name}: references site.py did not map: {left}"
     # the single file's loader placeholder: empty in the multi-file page (its development block loads the module)
@@ -371,8 +444,10 @@ def main():
     touch_link = f'<link rel="apple-touch-icon" href="{touch}">\n<meta name="apple-mobile-web-app-title" content="LensBolt">\n'
 
     # the app pages (the banner only when there is an app to get)
-    send = app_page("index.html", "send.html", touch_link + DESKTOP_MANIFEST + "\n" + REGISTER + "\n")
-    receive = app_page("receive.html", "receive.html", touch_link + (BANNER_STYLE if app_href else "") + REGISTER + "\n", android_banner(app_href, icon192) if app_href else "")
+    social = emit(os.path.join(SRC, "assets", "social.jpg"))
+    send = app_page("index.html", "send.html", seo_head("/send", *SEO["/send"], social) + touch_link + DESKTOP_MANIFEST + "\n" + REGISTER + "\n", title=SEO["/send"])
+    receive = app_page("receive.html", "receive.html", seo_head("/receive", *SEO["/receive"], social) + touch_link + (BANNER_STYLE if app_href else "") + REGISTER + "\n",
+                       android_banner(app_href, icon192) if app_href else "", title=SEO["/receive"])
 
     # the site's own pages
     icons = read(os.path.join(SRC, "icons.svg"))
@@ -409,11 +484,11 @@ def main():
       <a class="opt" href="https://github.com/akhil-dara/lensbolt-android/releases/latest" rel="noopener">Download the APK from GitHub Releases</a>
       <small>Until then, receive in the phone's browser at lensbolt.com/receive.</small>
     </div>"""
-    write("index.html", site_page("index.html", {"android": android, **{f"size:{s}": sizes[s] for s in SINGLE}}))
+    write("index.html", site_page("index.html", {"android": android, "jsonld": json_ld(social), **{f"size:{s}": sizes[s] for s in SINGLE}}))
 
     privacy_md = read(os.path.join(ROOT, "PRIVACY.md"))
     privacy_md = privacy_md.replace("\n## Changes", "\n" + SITE_PRIVACY + "\n## Changes", 1) if "\n## Changes" in privacy_md else privacy_md + "\n" + SITE_PRIVACY
-    write("privacy.html", site_page("page.html", {"title": "Privacy: LensBolt", "description": "LensBolt's privacy policy: the app and the website collect nothing.", "body": markdown(privacy_md)}))
+    write("privacy.html", site_page("page.html", {"title": SEO["/privacy"][0], "description": SEO["/privacy"][1], "head": seo_head("/privacy", *SEO["/privacy"], social), "body": markdown(privacy_md)}))
 
     rows = []
     for s, what, note in [("lensbolt.html", "The sender", "Shows your files on this screen for a camera to read."),
@@ -431,9 +506,17 @@ def main():
 {items}
 </ul>
 <p>{play_line}The pages online: <a href="/send">Send</a> and <a href="/receive">Receive</a>.</p>"""
-    write("downloads/index.html", site_page("page.html", {"title": "Downloads: LensBolt", "description": "LensBolt's sender and receiver as single offline HTML files.", "body": body}))
-    write("404.html", site_page("page.html", {"title": "Not found: LensBolt", "description": "This page does not exist.",
+    write("downloads/index.html", site_page("page.html", {"title": SEO["/downloads/"][0], "description": SEO["/downloads/"][1], "head": seo_head("/downloads/", *SEO["/downloads/"], social), "body": body}))
+    write("404.html", site_page("page.html", {"title": "Not found: LensBolt", "description": "This page does not exist.", "head": '<meta name="robots" content="noindex">\n',
                                               "body": '<h1>Nothing here</h1>\n<p>This page does not exist. Try the <a href="/">home page</a>, <a href="/send">Send</a> or <a href="/receive">Receive</a>.</p>'}))
+
+    # search: robots.txt names the sitemap (Cloudflare puts its content-signals notice above it), the sitemap lists
+    # the pages, llms.txt describes the site for language-model tools
+    write("robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n")
+    today = datetime.date.today().isoformat()
+    urls = "".join(f"  <url><loc>{SITE_URL}{p}</loc><lastmod>{today}</lastmod></url>\n" for p in ["/", "/send", "/receive", "/downloads/", "/privacy"])
+    write("sitemap.xml", f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')
+    write("llms.txt", LLMS.format(site=SITE_URL, author=AUTHOR["name"]))
 
     # the manifest (the sender, on desktops)
     write("manifest.webmanifest", json.dumps({
@@ -480,6 +563,10 @@ def main():
         ("/a/*", {"Cache-Control": "public, max-age=31536000, immutable"}),
         ("/i/*", {"Cache-Control": "public, max-age=31536000, immutable"}),
     ]
+    for host in DUPLICATE_HOSTS:
+        rules.append((host + "/*", {"X-Robots-Tag": "noindex"}))
+    for p in ("/robots.txt", "/sitemap.xml", "/llms.txt"):
+        rules.append((p, {"Cache-Control": "no-cache"}))
     # the offline pages download as files (opened from the site they would run without its CSP)
     for s in SINGLE:
         for p in (f"/downloads/{s[:-5]}", f"/downloads/{s}"):

@@ -106,6 +106,9 @@ section.block { padding-top: clamp(56px, 8vw, 104px); }
 .proof dt { font-weight: 650; display: flex; gap: 10px; align-items: center; }
 .proof dt svg { color: var(--primary-text); }
 .proof dd { margin: 6px 0 0 30px; color: var(--muted-fg); }
+#how .proof { border-top: 0; padding-top: 0; }
+#how .more { margin-top: 28px; color: var(--muted-fg); }
+.foot .by { margin: 0 0 12px; color: var(--muted-fg); font-size: .9375rem; }
 
 /* the Android app */
 .app { display: grid; gap: 28px 48px; grid-template-columns: 1fr; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) + 6px);

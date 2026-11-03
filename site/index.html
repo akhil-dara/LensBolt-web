@@ -18,6 +18,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="A laptop shows a square of fine moving dots and a phone in front of it reads them.">
 <meta name="twitter:card" content="summary_large_image">
+{{jsonld}}
 <link rel="icon" href="assets/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="stylesheet" href="site.css">
@@ -77,6 +78,27 @@
       <p>Sending from a virtual machine or a remote desktop? Open the receiver on the computer itself and choose <b data-way>Share a window</b>, then pick the window that shows the sender.</p>
     </li>
   </ul>
+</section>
+
+<section class="block wrap" id="how" aria-labelledby="how-title">
+  <div class="proof">
+    <h2 id="how-title">How it works</h2>
+    <dl>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>The file becomes moving frames</dt>
+        <dd>The sender cuts the file into packets, adds Reed&ndash;Solomon error correction and a fountain code, and draws them as a square of fine cells up to 1024 by 1024 pixels, 30 times a second. Black and white, greys or colours, picked for the screen.</dd>
+      </div>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>The camera finds the square and reads it</dt>
+        <dd>Four corner markers and a timing border tell the receiver exactly where the square is, even when the phone is tilted, turned or a little out of focus. It reads every cell and corrects the ones the camera got wrong.</dd>
+      </div>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>No frame has to be caught</dt>
+        <dd>The fountain code means the receiver needs enough frames, not particular ones: a frame missed while your hand moved is simply made up by later ones. When the file is complete, its SHA-256 is checked against the sender's.</dd>
+      </div>
+    </dl>
+  </div>
+  <p class="more">The codec, these pages and the Android app are open source: <a href="https://github.com/akhil-dara/lensbolt-core" rel="noopener">lensbolt-core</a>, <a href="https://github.com/akhil-dara/lensbolt-web" rel="noopener">lensbolt-web</a> and <a href="https://github.com/akhil-dara/lensbolt-android" rel="noopener">lensbolt-android</a>.</p>
 </section>
 
 <section class="block wrap" aria-labelledby="proof-title">

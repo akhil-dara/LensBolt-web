@@ -42,7 +42,11 @@ const DESKTOP_LINUX_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KH
 const GITHUB = 'https://github.com/akhil-dara/lensbolt-web';
 const APK_RELEASES = 'https://github.com/akhil-dara/lensbolt-android/releases/latest';
 const PLAY = 'https://play.google.com/store/apps/details?id=com.lensbolt.app';
-const ALLOWED = [GITHUB, `${GITHUB}/issues`, APK_RELEASES, 'https://buymeacoffee.com/akhildara1l', 'https://github.com/sponsors/akhil-dara', PLAY];
+// the author's profile and the two other repositories (the footer, How it works, the structured data); the
+// structured data's vocabulary and licence are names, not links a visitor follows
+const ALLOWED = [GITHUB, `${GITHUB}/issues`, APK_RELEASES, 'https://buymeacoffee.com/akhildara1l', 'https://github.com/sponsors/akhil-dara', PLAY,
+  'https://github.com/akhil-dara', 'https://github.com/akhil-dara/lensbolt-core', 'https://github.com/akhil-dara/lensbolt-android',
+  'https://schema.org', 'https://www.gnu.org/licenses/agpl-3.0.html', 'http://www.sitemaps.org/schemas/sitemap/0.9'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 let failed = 0;
@@ -218,7 +222,7 @@ const b64 = (s) => `'sha256-${createHash('sha256').update(s, 'utf8').digest('bas
 for (const p of pages) {
   const hd = headersFor(p);
   const csp = hd['content-security-policy'] || '';
-  const scripts = [...html[p].matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const scripts = [...html[p].matchAll(/<script\b(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   const styles = [...html[p].matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
   const missing = [...scripts, ...styles].filter((s) => !csp.includes(b64(s)));
   check(hd['cache-control'] === 'no-store', `${p}: Cache-Control ${hd['cache-control']}`);

@@ -140,8 +140,8 @@ dependencies = [
 
 [[package]]
 name = "lensbolt-core"
-version = "0.1.0"
-source = "git+https://github.com/akhil-dara/lensbolt-core?tag=v0.1.0#dcfd92ca0a470f23a0b43171064f8f2bd4abdf1a"
+version = "0.1.1"
+source = "git+https://github.com/akhil-dara/lensbolt-core?tag=v0.1.1#0be94fdd03e16736c0205875f64a134fe0a5e82b"
 dependencies = [
  "png",
  "ruzstd",
