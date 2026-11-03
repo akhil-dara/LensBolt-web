@@ -1,0 +1,1160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#F8FAFC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B1220" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<title>LensBolt Sender</title>
+<meta name="description" content="Send a file from this screen to a phone camera. No cable, no network, no account.">
+<style>
+  :root {
+    --primary: #2563EB; --on-primary: #FFFFFF; --primary-hover: #1D4ED8; --primary-text: #1D4ED8; --accent: #B45309; --accent-soft: #FEF3C7;
+    --bg: #F8FAFC; --fg: #0F172A; --card: #FFFFFF; --muted: #F1F5F9; --muted-fg: #475569;
+    --border: #E2E8F0; --border-strong: #CBD5E1; --destructive: #B91C1C; --ring: #2563EB; --ok: #15803D; --seg: #FFFFFF;
+    --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 8px 24px -12px rgba(15, 23, 42, .18);
+    --radius: 14px; --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px; --space-16: 64px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0B1220; --fg: #E2E8F0; --card: #111A2E; --muted: #16213A; --muted-fg: #A3B1C6; --border: #22304D; --border-strong: #33456A; --primary: #2563EB; --primary-hover: #1D4ED8; --primary-text: #93C5FD; --ring: #60A5FA; --accent: #FBBF24; --accent-soft: #3A2A0A; --destructive: #F87171; --ok: #4ADE80; --seg: #2A3B5E; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -16px rgba(0, 0, 0, .7); color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0B1220; --fg: #E2E8F0; --card: #111A2E; --muted: #16213A; --muted-fg: #A3B1C6; --border: #22304D; --border-strong: #33456A; --primary: #2563EB; --primary-hover: #1D4ED8; --primary-text: #93C5FD; --ring: #60A5FA; --accent: #FBBF24; --accent-soft: #3A2A0A; --destructive: #F87171; --ok: #4ADE80; --seg: #2A3B5E; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -16px rgba(0, 0, 0, .7); color-scheme: dark; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--primary); color: var(--on-primary); }
+  body { min-height: 100vh; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* top bar */
+  .bar { max-width: 760px; margin: 0 auto; padding: var(--space-5) var(--space-4) 0; display: flex; align-items: center; gap: var(--space-4); }
+  .brand { display: flex; align-items: center; gap: var(--space-2); text-decoration: none; color: var(--fg); font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand img { width: 30px; height: 30px; }
+  .brand b { color: var(--primary-text); }
+  .modes { margin-left: auto; display: flex; padding: 3px; background: var(--muted); border: 1px solid var(--border); border-radius: 999px; }
+  .modes a { min-height: 36px; padding: 0 var(--space-4); display: flex; align-items: center; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--muted-fg); text-decoration: none; }
+  .modes a[aria-current="page"] { background: var(--seg); color: var(--fg); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+  .modes a:not([aria-current]):hover { color: var(--fg); }
+  .icon-btn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted-fg); cursor: pointer; padding: 0; min-height: 0; }
+  .icon-btn:hover { color: var(--fg); background: var(--muted); }
+
+  main { max-width: 760px; margin: 0 auto; padding: var(--space-12) var(--space-4) var(--space-16); }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.1; font-weight: 700; letter-spacing: -0.03em; margin: 0 0 var(--space-3); text-wrap: balance; }
+  .lede { margin: 0 0 var(--space-8); color: var(--muted-fg); font-size: 18px; max-width: 58ch; text-wrap: pretty; }
+  /* the picture of what happens (a phone reading the tile), only while no file is chosen: once files are listed,
+     Start comes first */
+  .hero { display: block; width: 100%; height: auto; aspect-ratio: 16 / 7; object-fit: cover; object-position: 50% 50%; border-radius: var(--radius); margin: 0 0 var(--space-8); background: #050A1A; }
+  body.has-files .hero { display: none; }
+  @media (max-width: 560px) { .hero { aspect-ratio: 16 / 9; } }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 var(--space-3); }
+  section + section { margin-top: var(--space-10); }
+
+  /* file */
+  .drop { display: flex; align-items: center; gap: var(--space-5); border: 1.5px dashed var(--border-strong); border-radius: var(--radius); padding: var(--space-8) var(--space-6); cursor: pointer; background: var(--card); transition: border-color 150ms ease, background-color 150ms ease; }
+  .drop:hover, .drop.over { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--card)); }
+  .drop .glyph { width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary-text); flex: none; }
+  .drop .glyph svg { width: 26px; height: 26px; }
+  .drop strong { display: block; font-size: 17px; font-weight: 600; text-wrap: balance; }
+  .drop .drop-text { flex: 1; min-width: 0; }
+  .drop .drop-text > span { color: var(--muted-fg); font-size: 14px; }
+  /* looks like the Add files button; the whole area is the one control */
+  .drop .choose { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4); border-radius: 10px; border: 1px solid var(--border-strong); color: var(--fg); font-size: 15px; font-weight: 600; background: var(--card); }
+  .drop .choose svg.i { width: 18px; height: 18px; }
+  .drop:hover .choose { background: var(--muted); }
+  /* dragging files over the page: the area says what letting go does */
+  .drop .when-over { display: none; }
+  .drop.over .when-over { display: block; }
+  .drop.over .when-idle { display: none; }
+  @media (max-width: 560px) { .drop { flex-wrap: wrap; padding: var(--space-6) var(--space-5); } .drop .choose { width: 100%; justify-content: center; } }
+  /* the file list: name (its end always in view), size, remove; Add files and the running total above it */
+  .files { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); transition: border-color 150ms ease, background-color 150ms ease; }
+  .files.over { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 4%, var(--card)); }
+  .files-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5); border-bottom: 1px solid var(--border); }
+  .files-head .total { margin-right: auto; font-weight: 600; white-space: nowrap; }
+  .files-head button { white-space: nowrap; }
+  /* a phone: the total on a line of its own, the actions under it */
+  @media (max-width: 560px) { .files-head { flex-wrap: wrap; row-gap: var(--space-2); padding-top: var(--space-4); } .files-head .total { flex-basis: 100%; } }
+  .btn-sec { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4); border-radius: 10px; border: 1px solid var(--border-strong); background: transparent; color: var(--fg); font-size: 15px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease; }
+  .btn-sec:hover { background: var(--muted); }
+  .btn-sec svg.i { width: 18px; height: 18px; }
+  .file-list { list-style: none; margin: 0; padding: 0; max-height: 368px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  .file-row { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-5); content-visibility: auto; contain-intrinsic-size: auto 56px; }
+  .file-row + .file-row { border-top: 1px solid var(--border); }
+  .file-row .glyph { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--muted); color: var(--muted-fg); flex: none; }
+  .file-row .glyph svg { width: 18px; height: 18px; }
+  .file-row .meta { min-width: 0; flex: 1; }
+  .file-row .name { display: flex; min-width: 0; font-weight: 500; }
+  .file-row .stem { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+  .file-row .ext { flex: none; white-space: pre; }
+  .file-row .subline { display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--space-2); }
+  .file-row .sub { color: var(--muted-fg); font-size: 13px; }
+  .file-row .sub.bad { color: var(--destructive); }
+  /* the file's SHA-256 once it is read: behind a small toggle (one tap shows it, with Copy); monospace groups of four,
+     eight to a line where they fit (four on a narrow screen), selectable */
+  .sha-tog { display: inline-flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 var(--space-2); margin: -6px 0; border: 0; border-radius: 8px; background: transparent; color: var(--primary-text); font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
+  .sha-tog:hover { background: var(--muted); }
+  .sha-tog svg.i { width: 14px; height: 14px; transition: transform 200ms cubic-bezier(.16, 1, .3, 1); }
+  .sha-tog[aria-expanded="true"] svg.i { transform: rotate(90deg); }
+  .file-row .sha { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-1) 0 var(--space-2); }
+  .sha-hex { min-width: 0; font: 12px/1.5 ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; color: var(--muted-fg); user-select: text; cursor: text; }
+  .sha-hex .q { display: inline-block; white-space: nowrap; }
+  .sha-hex .l { display: block; }
+  .file-row .sha-copy { flex: none; min-height: 32px; padding: 0 var(--space-3); border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--fg); font-size: 12px; font-weight: 600; font-family: inherit; line-height: 1; cursor: pointer; transition: background-color 150ms ease; }
+  .file-row .sha-copy:hover { background: var(--muted); }
+  .undo { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; font-size: 14px; color: var(--fg); }
+  .rm { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 10px; border: 0; background: transparent; color: var(--muted-fg); cursor: pointer; padding: 0; transition: background-color 150ms ease, color 150ms ease; }
+  .rm:hover { background: var(--muted); color: var(--fg); }
+  .files-note { display: flex; gap: var(--space-2); align-items: flex-start; margin: var(--space-3) 0 0; font-size: 14px; max-width: 64ch; }
+  .files-note svg.i { width: 18px; height: 18px; margin-top: 2px; color: var(--accent); }
+  .list-msg { margin: var(--space-2) 0 0; color: var(--muted-fg); font-size: 14px; min-height: 1.5em; }
+  .list-msg.bad { color: var(--destructive); }
+  .link { background: none; border: 0; padding: 0 var(--space-2); min-height: 44px; color: var(--primary-text); font: inherit; font-weight: 600; cursor: pointer; }
+  .link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* speed */
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { padding: 0; font-size: 15px; font-weight: 600; margin-bottom: var(--space-3); }
+  .speeds { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); padding: var(--space-1); background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); }
+  .speed { position: relative; display: block; padding: var(--space-3) var(--space-4); border-radius: 10px; cursor: pointer; }
+  .speed input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .speed .t { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
+  .speed .d { display: block; color: var(--muted-fg); font-size: 13px; line-height: 1.4; margin-top: 2px; }
+  .speed:has(input:checked) { background: var(--card); box-shadow: var(--shadow), inset 0 0 0 1.5px var(--primary); }
+  /* dark: the chosen speed lifts with a blue tint (the card colour alone sits darker than the strip) */
+  :root[data-theme="dark"] .speed:has(input:checked) { background: color-mix(in srgb, var(--primary) 16%, var(--muted)); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .speed:has(input:checked) { background: color-mix(in srgb, var(--primary) 16%, var(--muted)); } }
+  .speed:has(input:focus-visible) { outline: 3px solid var(--ring); outline-offset: 1px; }
+  .tag { font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+  .pass { margin: var(--space-3) 0 0; color: var(--muted-fg); font-size: 14px; }
+  .share-tip { display: flex; gap: var(--space-2); align-items: flex-start; margin: var(--space-2) 0 0; color: var(--muted-fg); font-size: 14px; max-width: 64ch; }
+  .share-tip svg.i { width: 18px; height: 18px; margin-top: 2px; color: var(--primary-text); }
+  .share-tip a { color: var(--primary-text); font-weight: 600; text-underline-offset: 3px; }
+  .pass b { color: var(--fg); font-weight: 600; }
+  @media (max-width: 560px) { .speeds { grid-template-columns: 1fr; } }
+
+  details.adv { margin-top: var(--space-4); }
+  details.adv summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; color: var(--muted-fg); font-size: 14px; font-weight: 600; list-style: none; }
+  details.adv summary::-webkit-details-marker { display: none; }
+  details.adv summary svg { transition: transform 200ms cubic-bezier(.16, 1, .3, 1); }
+  details.adv[open] summary svg { transform: rotate(90deg); }
+  details.adv summary:hover { color: var(--fg); }
+  .adv-body { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4) var(--space-6); padding: var(--space-4) 0 0; }
+  @media (max-width: 560px) { .adv-body { grid-template-columns: 1fr; } }
+  label.f { display: block; font-size: 14px; font-weight: 500; margin-bottom: var(--space-1); }
+  .help { display: block; color: var(--muted-fg); font-size: 13px; margin-top: var(--space-1); }
+  .error { color: var(--destructive); font-size: 13px; margin-top: var(--space-1); min-height: 1.2em; }
+  .help.meaning { color: var(--fg); font-weight: 500; }
+  .help.meaning:empty { display: none; }
+  input[type=text], select { width: 100%; height: 44px; padding: 0 var(--space-3); border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); color: var(--fg); font: inherit; caret-color: var(--primary); }
+  input::placeholder { color: var(--muted-fg); }
+  input[aria-invalid="true"] { border-color: var(--destructive); }
+  .check { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; cursor: pointer; font-size: 14px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--primary); }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+
+  /* finish words: typed from the phone. The rest of a suggested word shows after the letters (only Tab takes it),
+     drawn by a copy of the field's text behind the transparent field */
+  .finish > label.f { font-size: 15px; font-weight: 600; margin-bottom: var(--space-3); }
+  .finish > .ac { max-width: 460px; }
+  .finish .help { max-width: 64ch; }
+  .ac { position: relative; border-radius: 10px; background: var(--card); }
+  .ac input[type=text] { position: relative; background: transparent; padding-right: 60px; }
+  .ac .ghost { position: absolute; inset: 0; padding: 0 var(--space-3); border: 1px solid transparent; display: flex; align-items: center; white-space: pre; overflow: hidden; pointer-events: none; color: transparent; }
+  .ac .ghost b { font-weight: inherit; color: var(--muted-fg); }
+  .ac kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font: 600 12px/1 Inter, system-ui, sans-serif; padding: 4px 7px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--muted); color: var(--muted-fg); pointer-events: none; opacity: 0; transition: opacity 150ms ease; }
+  .ac.has-rest kbd { opacity: 1; }
+  .fin-msg { display: flex; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-2); font-size: 14px; min-height: 1.5em; color: var(--muted-fg); }
+  .fin-msg svg { width: 18px; height: 18px; margin-top: 1px; }
+  .fin-msg.ok { color: var(--ok); }
+  .fin-msg.bad { color: var(--destructive); }
+
+  /* go */
+  .go { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+  button { font: inherit; }
+  .primary { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; font-size: 17px; min-height: 52px; padding: 0 var(--space-8); border-radius: 12px; border: 0; background: var(--primary); color: var(--on-primary); cursor: pointer; transition: background-color 150ms ease, transform 150ms ease; }
+  .primary:hover { background: var(--primary-hover); }
+  .primary:active { transform: translateY(1px); }
+  .primary:disabled { background: var(--muted); color: var(--muted-fg); cursor: not-allowed; }
+  .go p { margin: 0; color: var(--muted-fg); font-size: 14px; max-width: 60ch; text-wrap: pretty; }
+  /* the flashing notice: once per browser, before the first Start; its Start acknowledges it */
+  .flash { display: flex; gap: var(--space-4); align-items: flex-start; padding: var(--space-5) var(--space-6); border-radius: var(--radius); background: var(--accent-soft); max-width: 640px; }
+  .flash > svg.i { width: 24px; height: 24px; color: var(--accent); margin-top: 2px; }
+  .flash p { margin: 0 0 var(--space-4); font-size: 16px; text-wrap: pretty; }
+  .flash-btns { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+  #status { margin-top: var(--space-4); color: var(--muted-fg); font-size: 14px; min-height: 1.5em; }
+  #status.bad { color: var(--destructive); }
+  .receiver-hint { margin-top: var(--space-12); padding-top: var(--space-6); border-top: 1px solid var(--border); color: var(--muted-fg); font-size: 14px; display: flex; gap: var(--space-3); align-items: flex-start; }
+  .receiver-hint b { color: var(--fg); }
+  .receiver-hint p { margin: 0 0 var(--space-2); }
+  .receiver-hint p:last-child { margin: 0; }
+  .support { margin-top: var(--space-4); color: var(--muted-fg); font-size: 14px; display: flex; gap: var(--space-3); align-items: center; }
+  .support svg { color: var(--accent); }
+  .support a { color: var(--primary-text); font-weight: 600; text-underline-offset: 3px; white-space: nowrap; }
+
+  /* full-screen stage: the tile centred on black; the panel sits in the margin beside or above it, never on it */
+  #stage { position: fixed; inset: 0; background: #000; display: none; z-index: 10; color: #E2E8F0; }
+  #stage.on { display: block; }
+  /* the page under the stage does not scroll (no scrollbar beside the tile in a window) */
+  html:has(#stage.on) { overflow: hidden; }
+  /* placed by the script on whole device pixels (left/top/width/height in CSS px = device px / devicePixelRatio):
+     a centring transform can land the tile between device pixels, and the browser then resamples it */
+  #stage canvas { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
+  #panel { position: absolute; display: flex; flex-direction: column; gap: var(--space-4); font-size: 15px; }
+  #stage.side #panel { top: 50%; transform: translateY(-50%); }
+  #stage.top #panel { left: 50%; top: var(--space-3); transform: translateX(-50%); flex-direction: row; align-items: center; gap: var(--space-5); white-space: nowrap; }
+  /* no margin to use: a compact pill on the tile's centre, away from its markers and header strips (the cells
+     it hides cost a few symbols per codeword, which the error correction absorbs) */
+  #stage.over #panel { left: 50%; top: 50%; transform: translate(-50%, -50%); flex-direction: row; align-items: center; gap: var(--space-4); white-space: nowrap; padding: var(--space-3) var(--space-5); background: rgba(11, 18, 32, .9); border-radius: 14px; transition: opacity 300ms ease-out; }
+  /* it fades while counting too (on a dense screen at 2x the countdown's held manifest is under it) */
+  #stage.over.quiet #panel { opacity: 0; }
+  .p-file { font-weight: 600; color: #F8FAFC; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .p-sub { color: #A3B1C6; font-size: 14px; }
+  .count { display: flex; align-items: baseline; gap: var(--space-3); }
+  .count b { font-size: 72px; line-height: 1; font-weight: 700; color: #FBBF24; letter-spacing: -0.04em; min-width: 1.2ch; }
+  #stage.top .count b, #stage.over .count b { font-size: 34px; }
+  .p-steps { margin: 0; padding-left: 18px; color: #CBD5E1; font-size: 14px; line-height: 1.55; }
+  .p-btns { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .p-btns button { flex: 1 1 auto; white-space: nowrap; min-height: 44px; padding: 0 var(--space-4); border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid #33456A; background: transparent; color: #E2E8F0; }
+  .p-btns button.go-now { background: #2563EB; border-color: #2563EB; color: #fff; }
+  .p-btns button:hover { background: #16213A; }
+  .p-btns button.go-now:hover { background: #1D4ED8; }
+  .p-btns kbd { font: 600 12px/1 Inter, system-ui, sans-serif; padding: 2px 6px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .45); margin-left: 6px; }
+  .live { display: grid; grid-template-columns: auto auto; gap: var(--space-1) var(--space-5); font-size: 14px; color: #A3B1C6; }
+  .live b { color: #F8FAFC; font-weight: 600; text-align: right; }
+  #stage.top .live, #stage.over .live { display: flex; gap: var(--space-4); }
+  #stage.top .live b, #stage.over .live b { color: #FBBF24; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ADE80; box-shadow: 0 0 0 4px rgba(74, 222, 128, .18); display: inline-block; margin-right: var(--space-2); }
+  #stage.counting .dot { background: #FBBF24; box-shadow: 0 0 0 4px rgba(251, 191, 36, .18); }
+  #stage.over .p-steps, #stage.over .count .p-sub, #stage.over #p-hint { display: none; }
+  /* the file name off the pill but still read out by screen readers */
+  #stage.over .p-file { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #stage:not(.counting) .only-count, #stage.counting .only-send { display: none !important; }
+  /* finish words on the sending screen: the field opens in the panel (F), the parts being finished stay in view */
+  .p-fin { display: grid; gap: var(--space-2); width: 100%; white-space: normal; }
+  #stage.top .p-fin, #stage.over .p-fin { width: 320px; align-self: center; }
+  .p-fin-done { white-space: normal; color: #E2E8F0; max-width: 340px; }
+  .p-fin label { color: #CBD5E1; font-size: 14px; font-weight: 500; }
+  .p-fin-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  .p-close { min-height: 36px; padding: 0 var(--space-3); border-radius: 8px; border: 1px solid #33456A; background: transparent; color: #E2E8F0; font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease; }
+  .p-close:hover { background: #16213A; }
+  .p-fin .ac { background: #0B1220; }
+  .p-fin .ac input[type=text] { border-color: #33456A; color: #F8FAFC; caret-color: #93C5FD; }
+  .p-fin .ac input::placeholder { color: #8A9BB4; }
+  .p-fin .ac .ghost b { color: #8A9BB4; }
+  .p-fin .ac kbd { background: #16213A; border-color: #33456A; color: #CBD5E1; }
+  .p-fin .fin-msg { margin-top: 0; color: #A3B1C6; }
+  .p-fin .fin-msg.ok { color: #4ADE80; }
+  .p-fin .fin-msg.bad { color: #FCA5A5; }
+  .p-state { display: flex; align-items: center; color: #F8FAFC; font-size: 14px; }
+  .p-state .dot { background: #93C5FD; box-shadow: 0 0 0 4px rgba(147, 197, 253, .2); }
+  .p-state b { font-weight: 600; margin-left: .3em; }
+  /* the field needs a column of its own while it is open (the top and centre panels are a single row) */
+  #stage.typing.top #panel, #stage.typing.over #panel { flex-direction: column; align-items: stretch; }
+  /* the pill stays while the finish field is open; it does not stay for the focus alone (Stop has it from the start:
+     a pill kept by it hid the tile's centre for the whole transfer, so a receiver read no manifest); a key brings it
+     back for 2.5 s (the script's wake) */
+  #stage.over.typing #panel { opacity: 1; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L8.5 4.64A1 1 0 0 0 7 5.5z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.6 1.1 5 2.9 1.4-1.8 3-2.9 5-2.9 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4.5"/><path d="M12 16h.01"/></symbol>
+</svg>
+
+<div class="bar">
+  <a class="brand" href="index.html"><img src="assets/logo-mark-128.png" alt="" width="30" height="30"><span>Lens<b>Bolt</b></span></a>
+  <nav class="modes" aria-label="Mode"><a href="index.html" aria-current="page">Send</a><a href="receive.html">Receive</a></nav>
+  <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button>
+</div>
+
+<main>
+  <h1>Send files to a phone camera.</h1>
+  <p class="lede">This screen shows your files as moving tiles; the phone reads them and checks every byte. No cable, no network, no account. Nothing leaves this computer.</p>
+  <img class="hero" src="assets/hero.webp" width="1600" height="892" alt="A phone held beside a laptop, its camera reading the square of moving tiles on the laptop's screen.">
+
+  <section aria-labelledby="h-file">
+    <h2 id="h-file" class="sr-only">Files</h2>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-describedby="drop-sub">
+      <div class="glyph"><svg class="i"><use href="#i-up"/></svg></div>
+      <div class="drop-text"><strong class="when-idle">No files yet</strong><strong class="when-over">Let go to add them</strong><span id="drop-sub">Drop files here, or choose them. Any type; several files go as one transfer.</span></div>
+      <span class="choose" aria-hidden="true"><svg class="i"><use href="#i-plus"/></svg>Choose files</span>
+    </div>
+    <input type="file" id="file" multiple class="sr-only" aria-hidden="true" tabindex="-1">
+    <div class="files" id="files" hidden>
+      <div class="files-head">
+        <span class="total tnum" id="total" aria-live="polite"></span>
+        <button class="btn-sec" id="add" type="button"><svg class="i"><use href="#i-plus"/></svg>Add files</button>
+        <button class="link" id="clear" type="button">Remove all</button>
+      </div>
+      <ul class="file-list" id="list" aria-label="Files to send"></ul>
+    </div>
+    <p class="undo" id="undo-line" role="status" hidden><span id="undo-text"></span><button class="link" id="undo" type="button">Undo</button></p>
+    <p class="list-msg" id="list-msg"></p>
+    <p class="sr-only" id="list-live" role="status"></p>
+    <p class="files-note" id="big" hidden><svg class="i"><use href="#i-alert"/></svg><span id="big-text"></span></p>
+  </section>
+
+  <section aria-labelledby="h-speed">
+    <fieldset>
+      <legend id="h-speed">Speed</legend>
+      <div class="speeds" role="radiogroup" aria-labelledby="h-speed">
+        <label class="speed"><input type="radio" name="speed" value="sauce-minivan"><span class="t">Reliable</span><span class="d">Any phone, about an arm's length away.</span></label>
+        <label class="speed"><input type="radio" name="speed" value="satin-swift" checked><span class="t">Fast <span class="tag">Default</span></span><span class="d">Recent phones. Hold steady, tile filling the view.</span></label>
+        <label class="speed"><input type="radio" name="speed" value="sardine-berry"><span class="t">Fastest</span><span class="d">A VM or remote desktop read with the receiver's Share a window, or 4K phone cameras up close.</span></label>
+      </div>
+    </fieldset>
+    <p class="pass" id="pass" aria-live="polite"></p>
+    <p class="share-tip" id="share-tip"><svg class="i"><use href="#i-monitor"/></svg><span>Sending from a VM or remote desktop to this computer? Open the <a href="receive.html">receiver</a> here and choose Share a window.</span></p>
+    <details class="adv">
+      <summary><svg class="i"><use href="#i-chev"/></svg>Advanced</summary>
+      <div class="adv-body">
+        <div class="lab-only" id="lab-code" hidden>
+          <label class="f" for="code">Calibration words</label>
+          <input type="text" id="code" placeholder="e.g. shelf-vessel" autocomplete="off" spellcheck="false" aria-describedby="code-meaning code-help code-err">
+          <span class="help meaning tnum" id="code-meaning" aria-live="polite"></span>
+          <span class="help" id="code-help">From the phone's calibration result. Overrides the speed above.</span>
+          <div class="error" id="code-err" role="alert"></div>
+        </div>
+        <div>
+          <label class="f" for="fps">Frame rate</label>
+          <select id="fps"><option value="15">15 fps</option><option value="20">20 fps</option><option value="30" selected>30 fps</option><option value="60">60 fps</option></select>
+          <span class="help">Screen <span id="screen" class="tnum">…</span>; draws at <span id="draws" class="tnum">…</span>.</span>
+        </div>
+        <div>
+          <label class="f" for="tscale">Tile scale</label>
+          <select id="tscale"><option value="auto" selected>Auto</option><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option></select>
+          <span class="help">Device pixels per tile pixel. Auto draws the tile larger on dense screens (Retina, 4K laptops) so the phone can focus on it.</span>
+          <label class="check lab-only" id="lab-calib" hidden><input type="checkbox" id="calib"> Calibration carousel (measures what this phone can read)</label>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section class="finish" aria-labelledby="h-fin">
+    <label class="f" id="h-fin" for="fin">Finish words</label>
+    <div class="ac" id="fin-ac">
+      <div class="ghost" aria-hidden="true"><span></span><b></b></div>
+      <input type="text" id="fin" placeholder="e.g. lantern walnut" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="fin-help fin-msg fin-sugg">
+      <kbd aria-hidden="true">Tab</kbd>
+    </div>
+    <span class="help" id="fin-help">When the phone shows words, type them here or on the sending screen and press Enter: only the parts still missing are sent. Tab completes a word.</span>
+    <span class="sr-only" id="fin-sugg" aria-live="polite"></span>
+    <div class="fin-msg" id="fin-msg" role="status"></div>
+  </section>
+
+  <section aria-labelledby="h-go">
+    <h2 id="h-go" class="sr-only">Send</h2>
+    <div class="go" id="go">
+      <button class="primary" id="start" disabled><svg class="i"><use href="#i-play"/></svg>Start sending</button>
+      <p>You get <span id="lead">5</span> seconds to aim the phone before data starts.</p>
+    </div>
+    <div class="flash" id="flash" role="group" aria-labelledby="flash-text" hidden>
+      <svg class="i"><use href="#i-eye"/></svg>
+      <div>
+        <p id="flash-text">While it sends, the tile flashes rapidly (<span id="flash-fps">30</span> times a second): if flashing light affects you, look away from this screen.</p>
+        <div class="flash-btns">
+          <button class="primary" id="flash-ok" type="button"><svg class="i"><use href="#i-play"/></svg>Start sending</button>
+          <button class="link" id="flash-no" type="button">Not now</button>
+        </div>
+      </div>
+    </div>
+    <p id="status" aria-live="polite"></p>
+  </section>
+
+  <div class="receiver-hint"><svg class="i"><use href="#i-phone"/></svg><div><p>On the phone, open the <b>LensBolt app</b> or <b>lensbolt.com/receive</b> and point it at this screen. The receive page works offline once loaded.</p>
+    <p>Another computer can receive too: its receive page reads this screen with a <b>Webcam</b>, or with <b>Share a window</b> when this sender runs in a VM or remote desktop on it.</p></div></div>
+  <p class="support"><svg class="i"><use href="#i-heart"/></svg><span>LensBolt is free and works offline. If it helped, <a href="https://buymeacoffee.com/akhildara1l" target="_blank" rel="noopener">Buy me a coffee</a> · <a href="https://github.com/sponsors/akhil-dara" target="_blank" rel="noopener">GitHub Sponsors</a>.</span></p>
+</main>
+
+<div id="stage" role="dialog" aria-label="Sending" aria-modal="true">
+  <canvas id="canvas"></canvas>
+  <div id="panel">
+    <div class="p-file" id="p-file"></div>
+    <div class="count only-count" aria-live="polite"><b id="count" class="tnum">5</b><span class="p-sub">Aim the phone at this screen</span></div>
+    <ol class="p-steps only-count" id="p-steps"><li>The tile should fill most of the camera view.</li><li>The phone shows the file name when it can read the screen.</li></ol>
+    <div class="live only-send tnum" id="live">
+      <span><span class="dot"></span>Sending</span><b id="hud-time">0:00</b>
+      <span>Shown</span><b><span id="hud-pass">0</span>×</b>
+      <span>Frame rate</span><b><span id="hud-fps">0</span> fps</b>
+      <span class="sr-only">Frame</span><b class="sr-only" id="hud-n">0</b>
+    </div>
+    <div class="p-sub only-send" id="p-hint">Stop when the phone shows Received.</div>
+    <div class="p-sub" id="p-rate" role="status" hidden></div>
+    <div class="p-state" id="p-fin-state" role="status" hidden><span class="dot"></span>Finishing<b id="p-fin-desc"></b></div>
+    <div class="p-sub p-fin-done" id="p-fin-done" role="status" hidden>Named parts sent; sending everything. Type the phone's new words to finish faster.</div>
+    <div class="p-fin" id="p-fin" hidden>
+      <div class="p-fin-head"><label for="p-fin-in">Words from the phone</label><button class="p-close" id="p-fin-close" type="button">Close</button></div>
+      <div class="ac" id="p-fin-ac">
+        <div class="ghost" aria-hidden="true"><span></span><b></b></div>
+        <input type="text" id="p-fin-in" placeholder="e.g. lantern walnut" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="p-fin-msg p-fin-sugg">
+        <kbd aria-hidden="true">Tab</kbd>
+      </div>
+      <span class="sr-only" id="p-fin-sugg" aria-live="polite"></span>
+      <div class="fin-msg" id="p-fin-msg" role="status">Enter sends only the parts they name. Esc closes.</div>
+    </div>
+    <div class="p-btns">
+      <button class="go-now only-count" id="go-now" type="button">Start now<kbd>Space</kbd></button>
+      <button id="p-fin-btn" type="button" aria-expanded="false" aria-controls="p-fin">Finish words<kbd>F</kbd></button>
+      <button id="p-all" type="button" hidden>Send everything</button>
+      <button id="stop" type="button">Stop<kbd>Esc</kbd></button>
+    </div>
+  </div>
+</div>
+
+<script type="module" id="loader"></script>
+<script type="module">
+// development: load the glue from ./pkg when the single-file loader above is absent
+if (!window.LensBolt) {
+  try {
+    const m = await import("./pkg/lensbolt_web.js");
+    await m.default();
+    window.LensBolt = { WebSender: m.WebSender, WebFiles: m.WebFiles, describe_code: m.describe_code, bytes_per_second: m.bytes_per_second, tile_for_screen: m.tile_for_screen,
+      suggest_word: m.suggest_word, check_finish_words: m.check_finish_words, finish_context: m.finish_context, describe_finish: m.describe_finish, finish_code: m.finish_code };
+    window.dispatchEvent(new Event("lensbolt-ready"));
+  } catch (e) { document.getElementById("status").textContent = "LensBolt did not load (" + e + "). Reload the page."; }
+}
+</script>
+<script type="module">
+// the Finish field's rules (a module of their own for the node tests; the single-file build inlines them)
+import { completion, accept, applyWords, refusal, fileKey, wordsStayFor, codeMeaning } from './finish-logic.js';
+window.LensBoltFinish = { completion, accept, applyWords, refusal, fileKey, wordsStayFor, codeMeaning };
+</script>
+<script type="module">
+// the file list's rules (a module of their own for the node tests; the single-file build inlines them)
+import { fmtSize, totalText, memoryNote, isMemoryRefusal, splitName, dropped, folderNote, selectionKey, wordsStay, focusAfter, partsPhrase, noticeSeen, rememberNotice, slices, readingLine, readingNews, progressDue, passLine, stoppedLine, removedText } from './send-list.js';
+window.LensBoltList = { fmtSize, totalText, memoryNote, isMemoryRefusal, splitName, dropped, folderNote, selectionKey, wordsStay, focusAfter, partsPhrase, noticeSeen, rememberNotice, slices, readingLine, readingNews, progressDue, passLine, stoppedLine, removedText };
+</script>
+<script type="module">
+// a file's SHA-256 as the page shows it (a module of its own for the node tests; the single-file build inlines it)
+import { shaShown, shaSpoken, shaLines } from './sha-text.js';
+window.LensBoltSha = { shaShown, shaSpoken, shaLines };
+</script>
+<script type="module">
+// the tile's scale on dense screens and the display's rate (a module of their own for the node tests; the single-file build inlines them)
+import { autoScale, chooseTile, screenLine, parseScale, drawRate, sendRate, SCALE_KEY } from './screen-fit.js';
+window.LensBoltScreen = { autoScale, chooseTile, screenLine, parseScale, drawRate, sendRate, SCALE_KEY };
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const drop = $("drop"), input = $("file"), start = $("start"), code = $("code"), codeErr = $("code-err"), fpsSel = $("fps"), calib = $("calib");
+  const stage = $("stage"), canvas = $("canvas"), ctx = canvas.getContext("2d", { alpha: false });
+  const params = new URLSearchParams(location.search);
+  // ?lead=<s>: seconds to aim before data starts (0 for automated tests)
+  const LEAD = params.has("lead") ? Math.max(0, +params.get("lead") || 0) : 5;
+  // ?lab=1: the calibration words field and the carousel (lab tools: neither the app nor the browser receiver shows
+  // calibration words). Without it both stay hidden and empty (a value the browser restored on Back is cleared)
+  if (params.get("lab") === "1") { for (const el of document.querySelectorAll(".lab-only")) el.hidden = false; }
+  else { code.value = ""; calib.checked = false; }
+  $("lead").textContent = LEAD;
+  // rows: the file list in the order shown ({ uid, file, name, size, sid: its id in the module's store, state:
+  // "queued" | "reading" | "ready" | "error", done: bytes read, el })
+  let rows = [], sender = null, running = false, phase = "", status = (t, bad) => { $("status").textContent = t; $("status").classList.toggle("bad", !!bad); };
+  // finish words: the accepted words (as the matcher read them, each in full), given to every sender from Start on,
+  // and what they mean for the file (known once a sender has taken them)
+  let fin = { code: "", desc: "" };
+  // the file list the words in the Finish field were typed or accepted for (LensBoltList.selectionKey: for one file
+  // its LensBoltFinish.fileKey), null for words typed before any file was chosen: another list clears them, so one
+  // transfer's words never reach another's sender
+  let finFile = null;
+  const F = () => window.LensBoltFinish, keyOf = (f) => (F() ? F().fileKey(f) : null);
+  // the standard 1024-wide tile, 1024/896/768/640 tall as the screen allows (sizes the receiver tries), each tile px
+  // an s x s block of device pixels: s from devicePixelRatio (Auto, web/screen-fit.js: 1 on a 100-125% screen, 2 on
+  // a Retina or a 4K laptop at 200-250%), or the Tile scale chosen in Advanced (remembered in this browser)
+  const SF = () => window.LensBoltScreen, tscale = $("tscale");
+  try { const v = localStorage.getItem("lb-tile-scale"); if (v) tscale.value = v; } catch {}
+  if (![...tscale.options].some((o) => o.value === tscale.value)) tscale.value = "auto";
+  const manualScale = () => (SF() ? SF().parseScale(tscale.value) : 0);
+  let tileW = 0, tileH = 0;
+  function showScreen() {
+    if (!SF()) return;
+    const d = window.devicePixelRatio || 1, sw = (window.screen.width || window.innerWidth) * d, sh = (window.screen.height || window.innerHeight) * d;
+    const c = SF().chooseTile(d, sw, sh, manualScale());
+    tileW = c.w; tileH = c.h;
+    $("screen").textContent = SF().screenLine(sw, sh, c);
+  }
+  // the display's drawing rate: animation frames over 1 s (a hidden tab draws none: not measured); here at load,
+  // for Advanced; while sending, from the countdown's own frames
+  const measureDraw = () => new Promise((res) => {
+    const ts = [], done = () => res(SF() ? SF().drawRate(ts) : 0), quit = setTimeout(done, 1500);
+    const f = (t) => { ts.push(t); if (t - ts[0] < 1000) requestAnimationFrame(f); else { clearTimeout(quit); done(); } };
+    requestAnimationFrame(f);
+  });
+  const showDraws = (r) => { $("draws").textContent = r > 0 ? `${Math.round(r)} fps` : "not measured (hidden)"; };
+  const atLoad = () => { showScreen(); if (document.visibilityState === "visible") measureDraw().then(showDraws); else showDraws(0); };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", atLoad, { once: true }); else atLoad();
+  tscale.onchange = () => { try { if (tscale.value === "auto") localStorage.removeItem("lb-tile-scale"); else localStorage.setItem("lb-tile-scale", tscale.value); } catch {} showScreen(); refresh(); };
+  const fmt = n => n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : n >= 1e3 ? (n / 1e3).toFixed(0) + " KB" : n + " B";
+  const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  try { const t = localStorage.getItem("lb-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  $("theme").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const d = cur === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = d; try { localStorage.setItem("lb-theme", d); } catch {}
+  };
+
+  // ---- the file list: Add files, drag and drop, remove; each file is read into the module's memory once (a piece
+  // at a time, so the tab never holds it in JavaScript as well) and every sender made from the list shares it ----
+  const L = () => window.LensBoltList, list = $("list");
+  const PIECE = 8 << 20;
+  let store = null, uid = 0, folderMsg = "", starting = false;
+  // the list can change only while nothing is being started or sent
+  const busy = () => running || starting;
+  // one entry per distinct file (LensBoltFinish.fileKey: the same file added twice is one entry, its bytes held once,
+  // its id given twice to the sender), read in the order added: a queue and its cursor
+  const ents = new Map(), queue = [];
+  let queueAt = 0;
+  // counts kept as the list changes, so nothing walks the list per file read: rows' bytes, rows read, rows that could
+  // not be read (refused: for memory), bytes read into memory (each entry once)
+  let n = { bytes: 0, ready: 0, bad: 0, refused: 0, read: 0 };
+  // the list as the finish words remember it (LensBoltList.selectionKey: one file is the file's own key)
+  const selKey = () => (L() && F() ? L().selectionKey(rows.map((r) => r.file), keyOf) : null);
+  const ready = () => rows.length > 0 && n.ready === rows.length;
+  function ensureStore() {
+    if (!store && window.LensBolt) {
+      if (window.LensBolt.WebFiles) store = new window.LensBolt.WebFiles();
+      else status("LensBolt did not load completely (no file store). Reload the page.", true);
+    }
+    pump();
+  }
+  window.addEventListener("lensbolt-ready", ensureStore);
+  // for tests: what the module holds
+  window.__lbFiles = () => (store ? { count: store.count(), held: store.bytes_held() } : null);
+  function rowEl(r) {
+    const li = document.createElement("li"), { stem, ext } = L().splitName(r.name);
+    li.className = "file-row";
+    li.innerHTML = `<span class="glyph" aria-hidden="true"><svg class="i"><use href="#i-file"/></svg></span><span class="meta"><span class="name"><span class="stem"></span><span class="ext"></span></span><span class="subline"><span class="sub tnum"></span><button class="sha-tog" type="button" aria-expanded="false" hidden><svg class="i" aria-hidden="true"><use href="#i-chev"/></svg>SHA-256</button></span><span class="sha" hidden><span class="sha-hex" aria-hidden="true"></span><span class="sr-only sha-say"></span><button class="sha-copy" type="button">Copy</button></span></span><button class="rm" type="button"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>`;
+    li.querySelector(".stem").textContent = stem; li.querySelector(".ext").textContent = ext;
+    li.querySelector(".name").title = r.name;
+    const rm = li.querySelector(".rm");
+    rm.setAttribute("aria-label", `Remove ${r.name}`);
+    rm.onclick = () => removeRow(r);
+    r.sub = li.querySelector(".sub"); r.sha = li.querySelector(".sha"); r.tog = li.querySelector(".sha-tog");
+    r.tog.setAttribute("aria-label", `SHA-256 of ${r.name}`);
+    r.tog.onclick = () => { r.open = !r.open; showRow(r); };
+    const cp = li.querySelector(".sha-copy");
+    cp.setAttribute("aria-label", `Copy the SHA-256 of ${r.name}`);
+    cp.onclick = () => copySha(r, cp);
+    return li;
+  }
+  // Copy: the 64 digits to the clipboard, or selected where the clipboard is refused
+  async function copySha(r, btn) {
+    const hex = r.ent.sha || "";
+    let ok = false;
+    try { await navigator.clipboard.writeText(hex); ok = true; } catch {}
+    if (!ok) { const range = document.createRange(); range.selectNodeContents(r.sha.querySelector(".sha-hex")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+    btn.textContent = ok ? "Copied" : "Selected";
+    $("list-live").textContent = ok ? `SHA-256 of ${r.name} copied` : "SHA-256 selected: copy it with the browser";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1600);
+  }
+  // a row's second line: its size; while it is read, how far; a file that could not be read, why
+  function showRow(r) {
+    const e = r.ent, t = e.state === "error" ? e.error : e.state === "reading" && e.size > PIECE ? `${fmt(e.size)} · reading ${Math.floor((100 * e.done) / e.size)}%` : fmt(e.size);
+    if (r.sub.textContent !== t) r.sub.textContent = t;
+    r.sub.classList.toggle("bad", e.state === "error");
+    // under the name once the file is read: its SHA-256 (computed as it was read), what the receiver verifies
+    if (e.state === "ready" && !e.sha && store && e.sid !== null && store.sha256) e.sha = store.sha256(e.sid);
+    const S = window.LensBoltSha, shown = e.state === "ready" && S ? S.shaShown(e.sha) : "";
+    // collapsed by default: the toggle shows once the hash is known, one tap reveals it with Copy
+    r.tog.hidden = !shown;
+    r.tog.setAttribute("aria-expanded", String(!!(shown && r.open)));
+    r.sha.hidden = !shown || !r.open;
+    if (shown && r.sha.firstChild.textContent !== shown) { S.shaLines(r.sha.firstChild, e.sha); r.sha.querySelector(".sha-say").textContent = S.shaSpoken(e.sha); }
+  }
+  // an entry's rows counted as read or not read as its state changes
+  function setState(e, state) {
+    const k = e.rows.size;
+    if (e.state === "ready") n.ready -= k;
+    if (e.state === "error") { n.bad -= k; if (e.refused) n.refused -= k; }
+    e.state = state;
+    if (state === "ready") n.ready += k;
+    if (state === "error") { n.bad += k; if (e.refused) n.refused += k; }
+    for (const r of e.rows) showRow(r);
+  }
+  function addFiles(files, note = "") {
+    if (busy() || !L()) return;
+    folderMsg = note;
+    const frag = document.createDocumentFragment();
+    for (const f of files) {
+      const key = keyOf(f) || `#${uid + 1}`;
+      let e = ents.get(key);
+      if (!e) { e = { key, file: f, size: f.size, sid: null, state: "queued", done: 0, error: "", refused: false, gone: false, rows: new Set() }; ents.set(key, e); queue.push(e); if (reading) reading.count++; }
+      const r = { uid: ++uid, file: f, name: f.name, size: f.size, ent: e };
+      e.rows.add(r); n.bytes += r.size;
+      if (e.state === "ready") n.ready++;
+      if (e.state === "error") { n.bad++; if (e.refused) n.refused++; }
+      r.el = rowEl(r); showRow(r); rows.push(r); frag.append(r.el);
+    }
+    list.append(frag);
+    listChanged();
+    pump();
+  }
+  // a row goes; its file's bytes go with its last row (also while it is read: the reader stops)
+  function dropRow(r) {
+    const e = r.ent;
+    e.rows.delete(r); n.bytes -= r.size;
+    if (e.state === "ready") n.ready--;
+    if (e.state === "error") { n.bad--; if (e.refused) n.refused--; }
+    if (!e.rows.size) { e.gone = true; ents.delete(e.key); n.read -= e.done; if (e.sid !== null && store) store.remove(e.sid); e.sid = null; }
+  }
+  function removeRow(r) {
+    if (busy()) return;
+    const i = rows.indexOf(r);
+    if (i < 0) return;
+    dropRow(r); rows.splice(i, 1); r.el.remove(); folderMsg = "";
+    listChanged();
+    const at = L().focusAfter(rows.length + 1, i);
+    (at >= 0 ? rows[at].el.querySelector(".rm") : drop).focus();
+  }
+  // Remove all: never silent, and undone in one tap for a while (the files are read again)
+  let undoFiles = null, undoTimer = 0;
+  const hideUndo = () => { clearTimeout(undoTimer); undoFiles = null; $("undo-line").hidden = true; };
+  $("clear").onclick = () => {
+    if (busy()) return;
+    const was = rows.map((r) => r.file);
+    for (const e of ents.values()) { e.gone = true; if (e.sid !== null && store) store.remove(e.sid); e.sid = null; }
+    ents.clear(); queue.length = 0; queueAt = 0;
+    rows = []; list.textContent = ""; folderMsg = "";
+    n = { bytes: 0, ready: 0, bad: 0, refused: 0, read: 0 };
+    listChanged(); drop.focus();
+    if (was.length) {
+      $("undo-text").textContent = L().removedText(was.length);
+      $("undo-line").hidden = false; undoFiles = was;
+      clearTimeout(undoTimer); undoTimer = setTimeout(hideUndo, 10000);
+    }
+  };
+  $("undo").onclick = () => { const f = undoFiles; hideUndo(); if (f && !busy()) { addFiles(f); start.focus(); } };
+  // after any change to the list: its total, what the finish words belong to, Start
+  function listChanged() {
+    const has = rows.length > 0;
+    $("files").hidden = !has; drop.hidden = has;
+    document.body.classList.toggle("has-files", has);
+    if (has) hideUndo();
+    $("total").textContent = L().totalText(rows.length, n.bytes);
+    status("");
+    // words typed for another list are cleared (checked against it, a wrong code would pass 1 time in 64); the same
+    // list again (a resume), an emptied list and words typed before any file keep them, and they belong to this list
+    const k = selKey();
+    if (k !== null) {
+      if (!L().wordsStay(finFile, k)) { fin = { code: "", desc: "" }; finIn.value = ""; finIn.removeAttribute("aria-invalid"); finFile = null; }
+      else if (finIn.value.trim()) finFile = k;
+    }
+    // what the words meant for the last list is not this one's (they are checked again at Start)
+    fin.desc = ""; finMain(); refresh(); listMsg(true);
+  }
+  // said to a screen reader (the list's own live line): reading starting and ending, files that could not be read,
+  // folders left out, the memory note; the progress between is only shown
+  // (what is said within one frame is said together, in order)
+  let saying = [];
+  const say = (t) => {
+    if (!t) return;
+    if (!saying.length) { $("list-live").textContent = ""; requestAnimationFrame(() => { $("list-live").textContent = saying.join(" "); saying = []; }); }
+    saying.push(t);
+  };
+  // the line under the list (files still being read, at most once a second; files that could not be read; folders a
+  // drop left out) and the note naming the desktop app
+  let shownAt = -Infinity, lastBad = 0, lastNote = "";
+  function listMsg(now = false) {
+    const t0 = performance.now();
+    if (!L().progressDue(t0, shownAt, now || !reading)) return;
+    shownAt = t0;
+    const bad = n.bad;
+    const badLine = bad ? `${bad === 1 ? "A file" : `${bad} files`} could not be read: remove ${bad === 1 ? "it" : "them"} to send the rest.` : "";
+    const t = [folderMsg, badLine || (reading ? L().readingLine(n.ready, rows.length) : "")].filter(Boolean).join(" ");
+    const el = $("list-msg");
+    if (el.textContent !== t) el.textContent = t;
+    el.classList.toggle("bad", bad > 0);
+    if (bad > lastBad) say(badLine);
+    lastBad = bad;
+    const note = L().memoryNote(n.read, n.refused > 0);
+    if (note !== lastNote) { $("big-text").textContent = note; $("big").hidden = !note; if (note) say(note); lastNote = note; }
+  }
+  // the files, one entry at a time, into the module's memory; `reading`: the run under way (how many it reads)
+  let pumping = false, reading = null;
+  const SMALL_BATCH = 256;
+  async function pump() {
+    if (pumping || !store) return;
+    pumping = true;
+    try {
+      while (queueAt < queue.length) {
+        const e = queue[queueAt];
+        if (e.gone || e.state !== "queued") { queueAt++; continue; }
+        if (!reading) { reading = { count: queue.length - queueAt }; say(L().readingNews(reading.count, true)); }
+        if (e.size > PIECE) { queueAt++; await readEnt(e); continue; }
+        // small files: up to SMALL_BATCH of them (or PIECE * 4 bytes) read at once, one wait for all of them (a
+        // wait per file lets the page draw a 10,000-row list once per file)
+        const batch = [];
+        for (let bytes = 0; queueAt < queue.length && batch.length < SMALL_BATCH && bytes < PIECE * 4; queueAt++) {
+          const x = queue[queueAt];
+          if (x.gone || x.state !== "queued") continue;
+          if (x.size > PIECE) break;
+          batch.push(x); bytes += x.size; setState(x, "reading");
+        }
+        const got = await Promise.allSettled(batch.map((x) => x.file.arrayBuffer()));
+        // into the module (each file hashed as it goes in): at most PIECE bytes per task, so the page keeps drawing
+        let task = 0;
+        for (let i = 0; i < batch.length; i++) {
+          const x = batch[i];
+          if (task > 0 && task + x.size > PIECE) { task = 0; await new Promise((r) => setTimeout(r, 0)); }
+          if (x.gone) continue;
+          if (got[i].status === "rejected") { failEnt(x, got[i].reason); continue; }
+          const bytes = new Uint8Array(got[i].value);
+          try { x.sid = store.begin(x.file.name, x.size); } catch (err) { failEnt(x, err); continue; }
+          try { store.append(x.sid, bytes); store.finish(x.sid); } catch (err) { store.remove(x.sid); x.sid = null; failEnt(x, err); continue; }
+          task += x.size;
+          x.done = x.size; n.read += x.size;
+          setState(x, "ready");
+        }
+        listMsg(); refresh();
+      }
+      queue.length = 0; queueAt = 0;
+    } finally { pumping = false; }
+    if (reading) { const c = reading.count; reading = null; listMsg(true); say(L().readingNews(c, false)); }
+  }
+  async function readEnt(e) {
+    setState(e, "reading");
+    try { e.sid = store.begin(e.file.name, e.size); } catch (err) { return failEnt(e, err); }
+    try {
+      for (const [a, b] of L().slices(e.size, PIECE)) {
+        const piece = new Uint8Array(await e.file.slice(a, b).arrayBuffer());
+        if (e.gone) return; // removed while it was read: its memory went with it
+        store.append(e.sid, piece); e.done = b; n.read += b - a;
+        for (const r of e.rows) showRow(r);
+        listMsg();
+      }
+      store.finish(e.sid);
+      setState(e, "ready");
+    } catch (err) {
+      if (e.gone) return;
+      store.remove(e.sid); e.sid = null; n.read -= e.done; e.done = 0;
+      return failEnt(e, err);
+    }
+    listMsg(); refresh();
+  }
+  function failEnt(e, err) {
+    e.error = typeof err === "string" ? err : `Could not read this file (${err && err.message ? err.message : err}). Remove it and add it again.`;
+    e.refused = L().isMemoryRefusal(e.error);
+    setState(e, "error");
+    listMsg(true); refresh();
+  }
+  drop.onclick = () => input.click();
+  $("add").onclick = () => input.click();
+  drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+  // emptied after each pick, so the same file can be chosen again (a duplicate is kept as its own row)
+  input.onchange = () => { const fs = [...input.files]; input.value = ""; if (fs.length) addFiles(fs); };
+  // drag and drop anywhere on the page: files are added, folders left out (and said so)
+  let dragDepth = 0;
+  const withFiles = (e) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  const dropZone = () => (rows.length ? $("files") : drop);
+  const dragOff = () => { dragDepth = 0; drop.classList.remove("over"); $("files").classList.remove("over"); };
+  document.addEventListener("dragenter", (e) => { if (!withFiles(e)) return; e.preventDefault(); dragDepth++; if (!busy()) dropZone().classList.add("over"); });
+  document.addEventListener("dragover", (e) => { if (!withFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = busy() ? "none" : "copy"; });
+  document.addEventListener("dragleave", (e) => { if (withFiles(e) && --dragDepth <= 0) dragOff(); });
+  document.addEventListener("drop", (e) => {
+    e.preventDefault(); dragOff();
+    if (busy() || !L() || !e.dataTransfer) return;
+    const items = [...(e.dataTransfer.items || [])].filter((i) => i.kind === "file").map((i) => {
+      const entry = i.webkitGetAsEntry ? i.webkitGetAsEntry() : null;
+      return { file: i.getAsFile(), isDirectory: !!(entry && entry.isDirectory) };
+    });
+    const { files, folders } = L().dropped(items.length ? items : [...e.dataTransfer.files].map((f) => ({ file: f, isDirectory: false })));
+    if (files.length) addFiles(files, L().folderNote(folders));
+    else if (folders) { folderMsg = L().folderNote(folders); listMsg(true); say(folderMsg); }
+    if (files.length && folders) say(folderMsg);
+  });
+
+  const speedCode = () => (document.querySelector('input[name="speed"]:checked') || {}).value || "";
+  // the words typed in Advanced win; otherwise the chosen speed's words
+  function codeState() {
+    const v = code.value.trim();
+    const meaning = (t) => { if ($("code-meaning").textContent !== t) $("code-meaning").textContent = t; };
+    if (!v) { codeErr.textContent = ""; code.removeAttribute("aria-invalid"); meaning(""); return { ok: true, v: calib.checked ? "" : speedCode() }; }
+    if (!window.LensBolt) return { ok: false, v };
+    // what the words mean, beside them; the frame rate select is left as it is (Start sets it to the words' rate)
+    try { const d = window.LensBolt.describe_code(v); codeErr.textContent = ""; code.removeAttribute("aria-invalid"); meaning(F() ? F().codeMeaning(d) : ""); return { ok: true, v, desc: d.split(",") }; }
+    // the refusal in plain words (finish words typed here are named as such: this field never takes them)
+    catch (e) { meaning(""); codeErr.textContent = typeof e === "string" ? e : "Those words are not a LensBolt code. Check the spelling on the phone."; code.setAttribute("aria-invalid", "true"); return { ok: false, v }; }
+  }
+  function refresh() {
+    const c = codeState();
+    const ok = ready() && !!L();
+    start.disabled = !(ok && window.LensBolt && c.ok);
+    if (ok && window.LensBolt && c.v && tileW && tileH) {
+      // typed calibration words carry their own frame rate; a speed preset is shown at the select's rate
+      const bps = window.LensBolt.bytes_per_second(tileW, tileH, c.v) * (c.desc ? 1 : (+fpsSel.value) / 30);
+      $("pass").innerHTML = L().passLine(n.bytes / bps, rows.length);
+    } else $("pass").textContent = calib.checked && !code.value.trim() ? "The carousel cycles formats; the phone then shows the calibration words for this distance." : "";
+  }
+  document.querySelectorAll('input[name="speed"]').forEach(r => r.onchange = refresh);
+  code.oninput = refresh; fpsSel.onchange = refresh; calib.onchange = refresh;
+  window.addEventListener("lensbolt-ready", refresh);
+
+  // ---- finish words: typed from the phone, they make this screen send only the parts still missing ----
+  const finIn = $("fin"), pIn = $("p-fin-in");
+  // the rest of the suggested word after the letters typed (the core's suggest: never a word other than the one
+  // meant); only Tab takes it, and only while it is on screen
+  function showGhost(input, wrap, sugg) {
+    const lb = window.LensBolt, f = F();
+    const c = lb && f && document.activeElement === input ? f.completion(input.value, input.selectionStart, lb.suggest_word, input.selectionEnd) : null;
+    const on = !!c && input.scrollWidth <= input.clientWidth;
+    wrap.querySelector(".ghost span").textContent = on ? input.value : "";
+    wrap.querySelector(".ghost b").textContent = on ? c.rest : "";
+    wrap.classList.toggle("has-rest", on);
+    const say = on ? `Tab completes ${c.word}.` : "";
+    if ($(sugg).textContent !== say) $(sugg).textContent = say;
+  }
+  function wireField(input, wrap, sugg, onEnter, onEscape) {
+    const ghost = () => showGhost(input, wrap, sugg);
+    ["input", "keyup", "click", "focus", "blur", "select"].forEach(ev => input.addEventListener(ev, ghost));
+    input.addEventListener("keydown", e => {
+      if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        const a = wrap.classList.contains("has-rest") && window.LensBolt && F() ? F().accept(input.value, input.selectionStart, window.LensBolt.suggest_word, input.selectionEnd) : null;
+        if (a) { e.preventDefault(); input.value = a.value; input.setSelectionRange(a.caret, a.caret); input.dispatchEvent(new Event("input")); }
+      } else if (e.key === "Enter") { e.preventDefault(); onEnter(); }
+      else if (e.key === "Escape" && onEscape) { e.preventDefault(); onEscape(); }
+    });
+  }
+  function finMsg(el, text, kind) {
+    el.className = "fin-msg" + (kind ? " " + kind : "");
+    el.innerHTML = kind ? `<svg class="i"><use href="#i-${kind === "ok" ? "check" : "alert"}"/></svg>` : "";
+    const t = document.createElement("span"); t.textContent = text; el.append(t);
+  }
+  // the form's line for the accepted words: what Start will send
+  function finMain() {
+    const ok = !!fin.code && finIn.value.trim() === fin.code;
+    finMsg($("fin-msg"), ok ? (fin.desc ? `Start sends only ${phrase(fin.desc)}.` : "Start sends only the parts these words name.") : "", ok ? "ok" : "");
+  }
+  // what the words send, in a sentence: a batch's files in the parts they name, one file's parts
+  const phrase = (d) => (L() ? L().partsPhrase(d) : d);
+  // the words as the matcher reads them, each in full ("" when one is refused)
+  const readWords = (t) => { try { return window.LensBolt.check_finish_words(t); } catch { return ""; } };
+  // what Enter's result does to a field: accepted words are shown as read, each in full; a refusal names what to
+  // fix and selects the word to type again (the sender keeps sending as it was)
+  function showResult(r, input, msg, okText) {
+    if (r.kind === "error") {
+      input.setAttribute("aria-invalid", "true"); finMsg(msg, r.error, "bad"); input.focus();
+      if (r.select) input.setSelectionRange(r.select[0], r.select[1]);
+      return false;
+    }
+    input.removeAttribute("aria-invalid");
+    fin = r.kind === "ok" ? { code: r.words, desc: r.desc } : { code: "", desc: "" };
+    input.value = fin.code; finIn.value = fin.code; finIn.removeAttribute("aria-invalid"); finFile = fin.code ? selKey() : null;
+    finMain();
+    if (msg !== $("fin-msg")) finMsg(msg, fin.code ? okText(fin.desc) : "");
+    return true;
+  }
+  // Enter before Start, and Start with words not checked yet: the spelling and the number of words only (no pass
+  // over the file); Start checks them against the file with the sender itself
+  function checkWords() {
+    const lb = window.LensBolt, f = F();
+    if (!lb || !f) return false;
+    return showResult(f.applyWords(finIn.value, t => { lb.check_finish_words(t); return ""; }, readWords), finIn, $("fin-msg"));
+  }
+  finIn.addEventListener("input", () => { finFile = selKey(); if (finIn.value.trim() !== fin.code || !fin.code) finIn.removeAttribute("aria-invalid"); finMain(); });
+  // the sending screen: the parts being finished stay in view; F opens the field, Esc or Close closes it
+  function stageFinish(done = false) {
+    $("p-fin-state").hidden = !fin.code; $("p-fin-desc").textContent = phrase(fin.desc);
+    $("p-all").hidden = !fin.code;
+    $("p-fin-done").hidden = !done;
+  }
+  // the sender left the named parts by itself (each had its repair rounds) and sends everything again: the words are
+  // spent (a sender made again on a refit, or after Stop and Start, does not take them again), and the phone's new
+  // words finish faster
+  function finishSent() {
+    fin = { code: "", desc: "" }; finIn.value = ""; finFile = null; finMain();
+    stageFinish(true);
+    if (relayout) relayout();
+  }
+  let finClosedAt = -Infinity;
+  function openFin(on) {
+    const was = !$("p-fin").hidden;
+    $("p-fin").hidden = !on; $("p-fin-btn").setAttribute("aria-expanded", String(on)); stage.classList.toggle("typing", on);
+    // in full screen the browser leaves full screen on Esc: while the field is open Esc is kept for the field where
+    // the browser allows it (Keyboard Lock; elsewhere leaving full screen closes the field and sending goes on)
+    const kb = navigator.keyboard;
+    if (on && document.fullscreenElement && kb && kb.lock) kb.lock(["Escape"]).catch(() => {});
+    if (!on && kb && kb.unlock) kb.unlock();
+    if (on) { pIn.value = ""; pIn.removeAttribute("aria-invalid"); finMsg($("p-fin-msg"), "Enter sends only the parts they name. Esc closes."); pIn.focus(); }
+    else if (was) { finClosedAt = performance.now(); if (running) $("p-fin-btn").focus(); }
+    if (relayout) relayout();
+  }
+  function stageWords() {
+    if (!sender || !F()) return;
+    if (!pIn.value.trim()) { openFin(false); return; } // Enter on an empty field just closes it
+    const r = F().applyWords(pIn.value, t => sender.finish(t), readWords);
+    if (showResult(r, pIn, $("p-fin-msg"), d => `Sending only ${phrase(d)}.`)) { stageFinish(); openFin(false); }
+  }
+  wireField(finIn, $("fin-ac"), "fin-sugg", checkWords, null);
+  wireField(pIn, $("p-fin-ac"), "p-fin-sugg", stageWords, () => openFin(false));
+  $("p-fin-btn").onclick = () => openFin($("p-fin").hidden);
+  $("p-fin-close").onclick = () => openFin(false);
+  $("p-all").onclick = () => { if (sender) sender.send_everything(); showResult({ kind: "clear" }, pIn, $("p-fin-msg")); stageFinish(); $("stop").focus(); };
+
+  // ?testfile=<MB>: a generated file (pseudo-random, fixed seed), for automated end-to-end tests; ?testfiles=<N>: a
+  // batch of N generated files (0.5 to 20 KB each, one of them empty)
+  const testMb = Number(params.get("testfile")), testN = Math.floor(Number(params.get("testfiles")) || 0);
+  const gen = (n, seed) => { const d = new Uint8Array(n); let x = seed >>> 0 || 2463534242; for (let i = 0; i < n; i++) { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; d[i] = x & 255; } return d; };
+  const testFiles = testMb > 0 ? [new File([gen(Math.round(testMb * 1e6), 2463534242)], `test-${testMb}MB.bin`)]
+    : testN > 1 ? Array.from({ length: testN }, (_, i) => new File([gen(i === 1 ? 0 : 500 + (i * 7919) % 20000, 1000 + i)], `file-${String(i).padStart(4, "0")}.bin`)) : null;
+  if (testFiles) {
+    // the list's rules are a module: they have run once the document is parsed (else once it has loaded)
+    const add = (again) => (L() ? addFiles(testFiles) : again && document.addEventListener(again, () => add(again === "DOMContentLoaded" ? "load" : ""), { once: true }));
+    add("DOMContentLoaded");
+  }
+
+  // the tile on whole device pixels: the stage's size in device px (a window is whole device px, its CSS size
+  // can be fractional), the tile's offset in it rounded down to a device px, and left/top/width/height in CSS px
+  // = device px / devicePixelRatio. Done again whenever the window, full screen or the screen scaling (page zoom,
+  // another monitor) changes; a tile that no longer fits is refitted the way Start fits it, and a new scaling
+  // picks the block again (a window moved from a 125% laptop screen to a Retina or 4K monitor: 1x -> 2x).
+  const stageDev = () => { const r = stage.getBoundingClientRect(), d = window.devicePixelRatio || 1; return { d, w: Math.round(r.width * d), h: Math.round(r.height * d) }; };
+  // the tile for the stage: { s, w, h } (w or h 0: no 1024-wide tile fits even at 1x)
+  const fitFor = (st) => SF().chooseTile(st.d, st.w, Math.min(st.h, (window.screen.height || window.innerHeight) * st.d), manualScale());
+  let relayout = null, dprQuery = null;
+  const onScale = () => { watchScale(); showScreen(); if (relayout) relayout(); };
+  function watchScale() {
+    if (dprQuery) dprQuery.removeEventListener("change", onScale);
+    dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    dprQuery.addEventListener("change", onScale);
+  }
+  watchScale();
+  window.addEventListener("resize", () => { if (relayout) relayout(); });
+  function place() {
+    const s = stageDev(), d = s.d, x = Math.floor((s.w - canvas.width) / 2), y = Math.floor((s.h - canvas.height) / 2);
+    canvas.style.left = x / d + "px"; canvas.style.top = y / d + "px";
+    canvas.style.width = canvas.width / d + "px"; canvas.style.height = canvas.height / d + "px";
+    // the panel goes where the tile is not: the side margin, else the top margin, else a fading overlay
+    const mx = x / d, my = y / d, panel = $("panel");
+    panel.style.left = panel.style.width = "";
+    const layout = mx >= 230 ? "side" : my >= 76 ? "top" : "over";
+    if (layout === "side") { const w = Math.min(mx - 48, 340); panel.style.width = w + "px"; panel.style.left = Math.max(24, (mx - w) / 2) + "px"; }
+    stage.classList.remove("side", "top", "over"); stage.classList.add(layout);
+  }
+
+  // the tile's frame at 1x (tile px); on the screen each of its px an s x s block of device px. At s = 1 the frame
+  // goes straight to the screen's canvas; at s > 1 it is drawn into this one and copied scaled, image smoothing off
+  // (whole multiples: every block exact, never resampled by the browser)
+  const src = document.createElement("canvas"), sctx = src.getContext("2d", { alpha: false });
+  let scale = 1;
+  // the rate this run sends at (the chosen one, or the screen's own when it draws slower)
+  let sendFps = 0;
+  // the sending screen's pill shown again (set by each run)
+  let wakePill = () => {};
+  let timer = 0, beginSending = null, runs = 0, emittedBefore = 0;
+  function stop() {
+    if (!running) return;
+    running = false; relayout = null; clearInterval(timer); stage.className = "";
+    $("p-fin").hidden = true; $("p-fin-btn").setAttribute("aria-expanded", "false");
+    if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (sender) { status(L().stoppedLine(emittedBefore + sender.frames_emitted(), sendFps || sender.fps(), sender.frames_per_pass(), sender.file_count())); sender.free?.(); sender = null; }
+    start.focus();
+  }
+  $("stop").onclick = stop;
+  $("go-now").onclick = () => beginSending && beginSending();
+  // Space or Enter on Stop while the pill is faded (Stop keeps the focus) shows the pill instead of stopping: a
+  // key pressed to see the screen does not end the transfer. Esc still stops. (Capture phase: before the stage's
+  // own key handler shows the pill.)
+  let swallowKeyUp = false;
+  const pillHidden = () => stage.classList.contains("over") && stage.classList.contains("quiet") && !stage.classList.contains("typing");
+  document.addEventListener("keydown", e => {
+    if (running && (e.key === " " || e.key === "Enter") && e.target === $("stop") && pillHidden()) { e.preventDefault(); swallowKeyUp = e.key === " "; wakePill(); }
+  }, true);
+  document.addEventListener("keyup", e => { if (swallowKeyUp && e.key === " ") { e.preventDefault(); swallowKeyUp = false; } }, true);
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented) return;
+    if (!running || e.target === pIn) return; // the finish field keeps its own keys (Esc closes it)
+    if (e.key === "Escape") { if (!$("p-fin").hidden) openFin(false); else stop(); }
+    else if ((e.key === " " || e.key === "Enter") && phase === "count" && beginSending) { e.preventDefault(); beginSending(); }
+    else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && $("p-fin").hidden) { e.preventDefault(); openFin(true); }
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement || !running) return;
+    // Esc while typing finish words left full screen (a browser without Keyboard Lock): the field closes and
+    // sending goes on in the window; leaving full screen otherwise stops
+    if (!$("p-fin").hidden || performance.now() - finClosedAt < 500) { openFin(false); if (relayout) relayout(); return; }
+    stop();
+  });
+
+  // the flashing notice: before the first Start in this browser, its own Start acknowledges it (and, a click, lets
+  // the page go full screen). Pages opened with ?testfile or ?testfiles (automated runs) skip it
+  const storage = () => { try { return window.localStorage; } catch { return null; } };
+  const showNotice = (on) => {
+    $("go").hidden = on; $("flash").hidden = !on;
+    (on ? $("flash-ok") : start).focus();
+  };
+  start.onclick = () => {
+    const c = codeState(); if (!c.ok || !ready()) return;
+    if (testFiles || L().noticeSeen(storage())) { go(); return; }
+    $("flash-fps").textContent = c.desc ? c.desc[2] : fpsSel.value;
+    showNotice(true);
+  };
+  $("flash-ok").onclick = () => { L().rememberNotice(storage()); $("flash").hidden = true; $("go").hidden = false; start.focus(); go(); };
+  $("flash-no").onclick = () => showNotice(false);
+  $("flash").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); showNotice(false); } });
+  // Start: nothing is added to or removed from the list from here until sending stops
+  const go = async () => {
+    if (starting) return;
+    starting = true;
+    try { await startNow(); } finally { starting = false; }
+  };
+  const startNow = async () => {
+    const c = codeState(); if (!c.ok || !ready()) return;
+    showScreen();
+    if (!tileW || !tileH) { status("This screen is too small for a 1024-wide tile.", true); return; }
+    // finish words typed but not checked yet: their spelling checked now; refused ones keep the page here to be fixed
+    if (finIn.value.trim() !== fin.code && !checkWords()) return;
+    stage.className = "on counting";
+    try { await stage.requestFullscreen({ navigationUI: "hide" }); } catch {}
+    // the tile fits the space it is shown in: fullscreen, or a window (a sender inside a virtual machine or a
+    // remote desktop, read by screen sharing), on physical pixels
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const fit = fitFor(stageDev()), fitW = fit.w, fitH = fit.h, cal = calib.checked && !code.value.trim();
+    if (!fitW || !fitH) { stage.className = ""; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); status("This window is too small for a 1024-wide tile: make it larger or go full screen.", true); return; }
+    // the list as it is now (nothing can be added or removed while sending)
+    const ids = Uint32Array.from(rows, (r) => r.ent.sid), one = rows.length === 1 ? rows[0] : null, total = L().totalText(rows.length, n.bytes);
+    try { sender = window.LensBolt.WebSender.from_files(store, ids, fitW, fitH, c.v, cal); }
+    catch (e) { stage.className = ""; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); status(`Could not start sending (${e}). Choose another speed or other files, then try again.`, true); return; }
+    // words typed before Start apply from the first data frame, checked against the file by this sender. Each sender
+    // draws its own fresh repair offset when it is made, so a sender started again sends repair packets the receiver
+    // does not have yet. Words refused for this file: back to the form, the words kept, the problem named
+    if (fin.code) {
+      try { fin.desc = sender.finish(fin.code); }
+      catch (e) {
+        sender.free?.(); sender = null; stage.className = "";
+        const words = fin.code; fin = { code: "", desc: "" }; finIn.value = words;
+        // the field takes the focus once full screen has gone (leaving it drops the focus)
+        const back = () => showResult(F().refusal(words, e), finIn, $("fin-msg"));
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {}).finally(back); else back();
+        return;
+      }
+    }
+    const finish = (s) => { if (fin.code) try { fin.desc = s.finish(fin.code); } catch {} };
+    if (fin.code) finFile = selKey();
+    // typed calibration words: the frame rate select now shows the rate they send at (never changed while typing)
+    if (c.v && code.value.trim()) {
+      const r = String(sender.fps());
+      if (![...fpsSel.options].some((o) => o.value === r)) fpsSel.add(new Option(`${r} fps`, r));
+      fpsSel.value = r;
+    }
+    emittedBefore = 0; sendFps = 0;
+    scale = fit.s; src.width = fitW; src.height = fitH;
+    canvas.width = fitW * scale; canvas.height = fitH * scale;
+    place();
+    $("p-file").textContent = one ? `${one.name} · ${fmt(one.size)}` : total;
+    running = true; phase = "count";
+    stageFinish();
+    let img = ctx.createImageData(fitW, fitH), perPass = sender.frames_per_pass();
+    const chosenFps = c.v && code.value.trim() ? sender.fps() : +fpsSel.value;
+    let fps = chosenFps, period = 1000 / fps;
+    const paint = () => {
+      if (scale === 1) { ctx.putImageData(img, 0, 0); return; }
+      sctx.putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = false; // reset whenever the canvas is resized
+      ctx.drawImage(src, 0, 0, src.width * scale, src.height * scale);
+    };
+    const show = (rgba) => { img.data.set(rgba); paint(); };
+    const sizeTo = (w, h, s) => { scale = s; src.width = w; src.height = h; canvas.width = w * s; canvas.height = h * s; };
+    // the window, full screen or screen scaling changed: a tile that no longer fits is refitted (a new sender of
+    // the same files at the size Start would pick now, sharing their bytes: it begins with the manifest, the
+    // receiver carries on), and the tile is placed again on whole device pixels
+    // A new screen scaling (another monitor, page zoom) picks the block again, and the tile height with it; a
+    // stage that grows (the end of a full-screen animation, a larger window) gets the larger tile again.
+    relayout = () => {
+      if (!running) return;
+      const st = stageDev();
+      {
+        const f = fitFor(st);
+        if (f.w && f.h && f.h !== src.height) {
+          let next = null;
+          try { next = window.LensBolt.WebSender.from_files(store, ids, f.w, f.h, c.v, cal); } catch {}
+          if (next) {
+            finish(next);
+            emittedBefore += sender.frames_emitted(); sender.free?.(); sender = next; perPass = sender.frames_per_pass();
+            sizeTo(f.w, f.h, f.s); img = ctx.createImageData(f.w, f.h);
+            try { show(sender.next_frame_rgba()); } catch (e) { stop(); status(`Sending stopped (${e}). Press Start sending to try again.`, true); return; }
+          }
+        } else if (f.w && f.h && f.s !== scale) { sizeTo(f.w, f.h, f.s); paint(); }
+      }
+      place();
+    };
+    // the countdown holds the first frame, a manifest: the phone focuses, sets exposure and shows the file name.
+    // Every displayed frame of it carries the next frame number (the same manifest), so the phone also measures
+    // this sender's frame rate before data starts; sending then carries on from that number.
+    try { show(sender.next_frame_rgba()); } catch (e) { stop(); status(`Sending stopped (${e}). Press Start sending to try again.`, true); return; }
+    const run = ++runs; // a stopped run's loop ends even when a new run starts before its next frame
+    sendFps = chosenFps;
+    $("p-rate").hidden = true;
+    let left = LEAD;
+    $("count").textContent = left;
+    $("go-now").focus();
+
+    // the pill on the tile (no margin for the panel) fades soon after the countdown starts, so the phone reads the
+    // held manifest, and 2.5 s after any pointer move or key while sending
+    let quietTimer = 0;
+    const wake = (ms = 2500) => { stage.classList.remove("quiet"); clearTimeout(quietTimer); quietTimer = setTimeout(() => stage.classList.add("quiet"), ms); };
+    wakePill = () => wake(); stage.onpointermove = () => wake(); stage.onkeydown = () => wake();
+    wake(1200);
+    // this screen's drawing rate: the lower-quartile interval of the first second's animation frames (the countdown's,
+    // or with no countdown the first data frames'). A screen drawing more than 10% slower than the chosen rate (a
+    // 48 Hz mode, power saving, a browser that skips frames) is sent to at its own rate from then on: the frame
+    // numbers advance at the rate really shown, and that is the rate the receivers measure
+    const frameTimes = [];
+    const measure = (now) => {
+      frameTimes.push(now);
+      if (now - frameTimes[0] < 1000) return;
+      measuring = false;
+      const drawn = SF().drawRate(frameTimes), rate = SF().sendRate(chosenFps, drawn);
+      showDraws(drawn);
+      if (rate.fps !== fps) { fps = sendFps = rate.fps; period = 1000 / fps; next = now + period; }
+      $("p-rate").textContent = rate.note; $("p-rate").hidden = !rate.note;
+    };
+    let measuring = true;
+    // one clock for the countdown and the data: a frame per period of the chosen rate
+    let next = performance.now() + period, shown = 0, t0 = 0;
+    const tick = now => {
+      if (!running || run !== runs) return;
+      if (measuring) measure(now);
+      if (now >= next - 1) {
+        next += period; if (now - next > period * 4) next = now; // dropped a lot: resync
+        try { show(phase === "count" ? sender.hold_frame_rgba() : sender.next_frame_rgba()); } catch (e) { stop(); status(`Sending stopped (${e}). Press Start sending to try again.`, true); return; }
+        if (fin.code && sender.focus_done()) finishSent();
+        if (phase === "send" && ++shown % 10 === 0) {
+          const el = (now - t0) / 1000;
+          $("hud-n").textContent = shown; $("hud-time").textContent = clock(el);
+          $("hud-pass").textContent = (shown / perPass).toFixed(1); $("hud-fps").textContent = (shown / el).toFixed(0);
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+    beginSending = () => {
+      if (phase !== "count") return;
+      phase = "send"; clearInterval(timer); t0 = performance.now();
+      stage.classList.remove("counting"); stage.classList.add("sending"); wake();
+      if ($("p-fin").hidden) $("stop").focus(); // never while the field is open: the next Space or Enter would stop
+    };
+    requestAnimationFrame(tick);
+    if (left <= 0) { beginSending(); return; }
+    timer = setInterval(() => { left -= 1; $("count").textContent = left; if (left <= 0) beginSending(); }, 1000);
+  };
+  ensureStore();
+})();
+</script>
+</body>
+</html>

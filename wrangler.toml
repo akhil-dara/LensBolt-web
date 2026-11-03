@@ -1,0 +1,5 @@
+# Cloudflare Pages project for lensbolt.com: a static site, free tier only (no Functions, no Workers, no bindings).
+# Build: python web/build.py && python web/site.py   (see docs/DEPLOY.md)
+name = "lensbolt"
+pages_build_output_dir = "public"
+compatibility_date = "2026-11-01"

@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F8FAFC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B1220" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<title>LensBolt Receiver</title>
+<script>try { const t = localStorage.getItem('lb-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<meta name="description" content="Receive a file from a LensBolt screen with this phone's camera. Nothing leaves the phone.">
+<style>
+  :root {
+    --primary: #2563EB; --on-primary: #FFFFFF; --secondary: #3B82F6;
+    /* the button fill keeps the deeper blue in both themes: white on #3B82F6 is 3.7:1 */
+    --btn: #2563EB; --btn-hover: #1D4ED8; --accent: #D97706; --ok: #15803D; --destructive: #DC2626;
+    --bg: #F8FAFC; --fg: #0F172A; --card: #FFFFFF; --muted: #F1F5FD; --muted-fg: #475569; --border: #E4ECFC; --ring: #2563EB;
+    /* the selected segment of the Send/Receive switch, and the text of a problem */
+    --seg: #FFFFFF; --bad-fg: #B91C1C;
+    /* the camera screens: dark panels over live video, whatever the system theme (the scene is a phone held to a bright screen) */
+    --scrim: rgba(11, 18, 32, 0.78); --scrim-fg: #F1F5F9; --scrim-muted: #A8B5C9; --scrim-line: rgba(148, 163, 184, 0.28);
+    --lock: #60A5FA; --warn: #FBBF24; --good: #4ADE80;
+    --radius: 14px; --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+    --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+    font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0B1220; --fg: #E2E8F0; --card: #111A2E; --muted: #16213A; --muted-fg: #A3B1C6; --border: #22304D; --primary: #60A5FA; --secondary: #60A5FA; --ring: #60A5FA; --seg: #2A3B5E; --bad-fg: #FCA5A5; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0B1220; --fg: #E2E8F0; --card: #111A2E; --muted: #16213A; --muted-fg: #A3B1C6; --border: #22304D; --primary: #60A5FA; --secondary: #60A5FA; --ring: #60A5FA; --seg: #2A3B5E; --bad-fg: #FCA5A5; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); -webkit-tap-highlight-color: transparent; }
+  ::selection { background: color-mix(in srgb, var(--primary) 30%, transparent); }
+  button { font: inherit; font-weight: 600; min-height: 48px; padding: 0 var(--s5); border-radius: 12px; border: 1px solid transparent; cursor: pointer;
+           display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); transition: background 160ms ease-out, transform 120ms ease-out; }
+  button:active { transform: scale(0.98); }
+  button:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  .primary { background: var(--btn); color: var(--on-primary); }
+  .primary:hover { background: var(--btn-hover); }
+  .ghost { background: transparent; color: inherit; border-color: currentColor; border-color: color-mix(in srgb, currentColor 35%, transparent); }
+  .ghost:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+  svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .num { font-variant-numeric: tabular-nums; }
+  [hidden] { display: none !important; }
+
+  /* start: the header at the top, the action within thumb reach at the bottom of a phone screen */
+  html { overscroll-behavior: none; }
+  #start { min-height: 100%; min-height: 100dvh; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto;
+           padding: calc(var(--s4) + var(--safe-t)) var(--s5) calc(var(--s6) + var(--safe-b)); }
+  .brand { display: flex; align-items: center; gap: var(--s3); min-height: 48px; }
+  .brand > b { display: flex; align-items: center; gap: var(--s2); font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand img { width: 32px; height: 32px; }
+  .brand .name span { color: var(--primary); }
+  .modes { margin-left: auto; display: flex; padding: 3px; background: var(--muted); border: 1px solid var(--border); border-radius: 999px; }
+  .modes a { min-height: 38px; padding: 0 var(--s4); display: flex; align-items: center; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--muted-fg); text-decoration: none; transition: color 160ms ease-out; }
+  .modes a[aria-current="page"] { background: var(--seg); color: var(--fg); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+  .modes a:not([aria-current]):hover { color: var(--fg); }
+  .modes a:focus-visible, .support a:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  #theme { min-height: 44px; min-width: 44px; padding: 0; border-radius: 999px; background: transparent; color: var(--muted-fg); border-color: var(--border); }
+  #theme:hover { color: var(--fg); background: var(--muted); }
+  .intro { padding-top: clamp(var(--s8), 9vh, 96px); }
+  #start h1 { font-size: clamp(30px, 8.4vw, 36px); line-height: 1.15; letter-spacing: -0.025em; margin: 0 0 var(--s3); text-wrap: balance; }
+  .lede { margin: 0 0 var(--s6); color: var(--muted-fg); font-size: 17px; max-width: 44ch; text-wrap: pretty; }
+  .facts { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--s3); }
+  .facts li { display: flex; gap: var(--s3); align-items: flex-start; color: var(--fg); font-weight: 600; }
+  .facts li svg { color: var(--primary); margin-top: 2px; }
+  .facts small { display: block; color: var(--muted-fg); font-size: 15px; font-weight: 400; margin-top: 2px; }
+  .go-group { margin-top: auto; padding-top: var(--s8); display: grid; gap: var(--s3); }
+  /* the three ways in: equal choices, each a picture, its name and one line */
+  .ways-h { margin: var(--s2) 0 0; font-size: 15px; font-weight: 600; color: var(--fg); }
+  .ways { display: grid; gap: var(--s2); }
+  .how { margin-top: var(--s1); }
+  .way { display: grid; grid-template-columns: 112px 1fr; align-items: center; gap: var(--s4); width: 100%; min-height: 0; padding: var(--s3); text-align: left; font-weight: 400;
+         background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 1px 2px rgba(15, 23, 42, .06); transition: border-color 160ms ease-out, background 160ms ease-out, transform 120ms ease-out; }
+  .way:hover:not(:disabled) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--card)); }
+  .way img { width: 112px; height: auto; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 10px; background: #050A1A; display: block; }
+  .way b { display: block; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .way small { display: block; margin-top: 2px; color: var(--muted-fg); font-size: 14px; line-height: 1.4; text-wrap: pretty; }
+  .way .need { color: var(--muted-fg); font-style: italic; }
+  .way:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+  .way:disabled:active { transform: none; }
+  .how { color: var(--muted-fg); font-size: 14px; }
+  .how summary { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; cursor: pointer; font-weight: 600; color: var(--fg); list-style: none; }
+  .how summary::-webkit-details-marker { display: none; }
+  .how summary svg { width: 18px; height: 18px; transition: transform 200ms cubic-bezier(.16, 1, .3, 1); }
+  .how[open] summary svg { transform: rotate(90deg); }
+  .how summary:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; border-radius: 8px; }
+  .how ol { margin: 0 0 var(--s2); padding-left: 1.3em; display: grid; gap: var(--s2); line-height: 1.5; }
+  .how li b { color: var(--fg); }
+  .support { margin: var(--s6) 0 0; color: var(--muted-fg); font-size: 14px; display: flex; gap: var(--s2); align-items: flex-start; }
+  .support svg { color: var(--accent); width: 18px; height: 18px; flex: none; margin-top: 2px; }
+  .support a { color: var(--primary); font-weight: 600; text-underline-offset: 3px; white-space: nowrap; }
+  .problem { display: flex; gap: var(--s3); align-items: flex-start; padding: var(--s4); border-radius: var(--radius); background: color-mix(in srgb, var(--destructive) 8%, var(--card));
+             color: var(--fg); border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent); }
+  .problem svg { color: var(--bad-fg); margin-top: 2px; }
+  .problem strong { display: block; margin-bottom: 2px; color: var(--bad-fg); }
+  .problem p { margin: 0; color: var(--fg); font-size: 15px; overflow-wrap: anywhere; }
+  /* a large screen: the column sits in the middle, the action right under the facts */
+  @media (min-width: 720px) and (min-height: 640px) {
+    #start { padding-top: calc(var(--s6) + var(--safe-t)); }
+    .intro { padding-top: clamp(var(--s8), 8vh, 88px); }
+    .go-group { margin-top: 0; }
+  }
+  /* a wide window: the three ways side by side, the picture on top */
+  @media (min-width: 720px) {
+    #start { max-width: 800px; }
+    .ways { grid-template-columns: repeat(3, 1fr); }
+    .way { grid-template-columns: 1fr; align-content: start; align-items: start; gap: var(--s3); height: 100%; }
+    .way img { width: 100%; }
+  }
+
+  /* camera */
+  /* taps on the picture focus (no double-tap zoom, no text selection while the phone is held) */
+  #cam { position: fixed; inset: 0; background: #000; color: var(--scrim-fg); overflow: hidden; color-scheme: dark; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+  #cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .reticle { position: absolute; left: 50%; top: 44%; width: min(78vw, 62vh); aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none;
+             color: rgba(255, 255, 255, 0.7); transition: color 200ms ease-out; }
+  .reticle svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 3; fill: none; stroke-linecap: round; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+  #cam[data-lock="locked"] .reticle { color: var(--lock); }
+  #cam[data-lock="warn"] .reticle { color: var(--warn); }
+  #cam[data-lock="good"] .reticle { color: var(--good); }
+  /* a shared window: nothing to aim, no aiming frame */
+  #cam[data-src="screen"] .reticle { display: none; }
+  .head { position: absolute; top: calc(var(--s4) + var(--safe-t)); left: var(--s4); right: var(--s4); display: grid; gap: var(--s2); }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); }
+  /* the guidance: one line in a pill; a longer one wraps inside the same rounded shape */
+  .pill { background: var(--scrim); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--scrim-line); border-radius: 22px;
+          min-height: 44px; padding: var(--s2) var(--s4); display: inline-flex; align-items: center; gap: var(--s2); font-weight: 600; font-size: 15px; line-height: 1.35; max-width: 100%; min-width: 0; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--scrim-muted); flex: none; transition: background 200ms ease-out; }
+  #cam[data-lock="locked"] .pill .dot { background: var(--lock); }
+  #cam[data-lock="warn"] .pill .dot { background: var(--warn); }
+  #cam[data-lock="good"] .pill .dot { background: var(--good); }
+  .iconbtn { min-height: 44px; min-width: 44px; padding: 0; border-radius: 999px; background: var(--scrim); color: var(--scrim-fg); border-color: var(--scrim-line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .iconbtn:hover { background: rgba(30, 41, 59, 0.9); }
+  .iconbtn[aria-pressed="true"] { background: var(--scrim-fg); color: #0B1220; border-color: var(--scrim-fg); }
+  .iconbtn:disabled { opacity: 0.5; cursor: default; }
+  .top .acts { display: flex; gap: var(--s2); flex: none; }
+  .notes { display: grid; gap: var(--s2); }
+  .note { padding: var(--s3) var(--s4); border-radius: var(--radius); background: var(--scrim); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--scrim-line); font-size: 14px; line-height: 1.45; }
+  .note.warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+  .note.warn strong { color: var(--warn); }
+  .note strong { display: block; margin-bottom: 2px; }
+  .note strong { font-size: 15px; }
+  .note p { margin: 0; color: #CBD5E1; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; padding: var(--s5) var(--s5) calc(var(--s5) + var(--safe-b)); background: var(--scrim);
+           backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--scrim-line); border-radius: 20px 20px 0 0; }
+  .sheet .name { font-weight: 600; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: var(--s3); }
+  .sheet .name.wait { color: var(--scrim-muted); font-weight: 500; }
+  .bar { height: 8px; border-radius: 99px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--lock); border-radius: inherit; transition: width 220ms ease-out; }
+  .stats { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: var(--s3); margin-top: var(--s4); }
+  .stats b { white-space: nowrap; }
+  .stats div small { display: block; color: var(--scrim-muted); font-size: 13px; white-space: nowrap; }
+  .stats div b { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  /* finish words: large and selectable (the camera screen is not), copied in one tap for a sender in a VM or remote desktop */
+  .finish { margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--scrim-line); }
+  .finish p { margin: 0 0 var(--s1); color: var(--scrim-muted); font-size: 14px; }
+  .finish-row { display: flex; align-items: center; gap: var(--s3); }
+  .finish .words { flex: 1; min-width: 0; font-size: clamp(22px, 6.4vw, 28px); line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; word-spacing: 0.18em; color: var(--scrim-fg);
+                   overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; cursor: text; }
+  .finish .words::selection { background: color-mix(in srgb, var(--lock) 45%, transparent); }
+  .finish .ghost { flex: none; min-height: 44px; padding: 0 var(--s4); color: var(--scrim-fg); }
+  .finish .ghost svg { width: 18px; height: 18px; }
+  /* a phone: Copy is its icon (its label shows while it says Copied); a short phone: smaller words, and the aiming
+     frame sits higher and smaller so the sheet with the words never covers it (below) */
+  @media (max-width: 480px) { .finish .ghost { padding: 0 var(--s3); } .finish .ghost:not(.said) #copy-text { display: none; } }
+  .finish .parts { margin: var(--s1) 0 0; color: var(--scrim-muted); font-size: 13px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  /* a short phone: tighter around the words, so the line of parts under them still leaves the aiming frame clear */
+  @media (max-height: 700px) { .finish { margin-top: var(--s2); padding-top: var(--s2); } .finish p { margin-bottom: 2px; } .finish .parts { margin-top: 0; } .finish .words { font-size: 22px; } }
+  @media (max-width: 719px) and (max-height: 700px) { .reticle { top: 38%; width: min(72vw, 50vh); } }
+  /* Details: a scroll of its own, so the picture and the square stay in view */
+  .details { margin: var(--s4) 0 0; padding-top: var(--s3); border-top: 1px solid var(--scrim-line); font-size: 13px; line-height: 1.45; color: var(--scrim-muted); display: grid; grid-template-columns: auto 1fr; gap: 3px var(--s4);
+             max-height: min(36vh, 320px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrim-line) transparent; padding-right: var(--s2); -webkit-user-select: text; user-select: text; }
+  .details dt { color: var(--scrim-muted); } .details dd { margin: 0; color: var(--scrim-fg); overflow-wrap: anywhere; }
+
+  /* done */
+  /* the Done screen: the title, meta and summary close together; the actions, then the list, set apart */
+  .done { display: grid; gap: var(--s2); }
+  .done .sha { margin-top: var(--s1); }
+  .done .actions { margin-top: var(--s4); }
+  .done > .files { margin-top: var(--s6); }
+  .done .ask, .done .support { margin-top: var(--s6); }
+  .done .title { display: flex; gap: var(--s3); align-items: center; }
+  .done .title svg { width: 28px; height: 28px; color: var(--good); }
+  .done .title.warn svg { color: var(--warn); }
+  .done h2 { margin: 0; font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
+  .done p { margin: 0; color: var(--scrim-muted); font-size: 15px; }
+  .done .verified { display: flex; gap: var(--s2); align-items: center; color: var(--good); font-weight: 600; font-size: 15px; }
+  .done .verified svg { width: 18px; height: 18px; }
+  /* the file's SHA-256: monospace groups of four, two lines of eight (four a line where eight do not fit; never a
+     group split), selectable, with Copy beside it: the same block as the app's Done screen */
+  .sha { display: flex; align-items: flex-start; gap: var(--s3); }
+  .sha-hex { flex: 1; min-width: 0; font: 500 14px/1.5 ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; color: var(--scrim-fg);
+             word-spacing: 0.1em; -webkit-user-select: text; user-select: text; cursor: text; }
+  .sha-hex .l { display: block; }
+  .sha-hex .q { display: inline-block; white-space: nowrap; }
+  .sha .ghost { flex: none; min-height: 44px; padding: 0 var(--s4); color: var(--scrim-fg); font-size: 14px; }
+  .sha .ghost svg { width: 18px; height: 18px; }
+  .fhash { margin: 0; padding: var(--s3) 0 0; border-top: 1px solid var(--scrim-line); display: grid; gap: var(--s1); }
+  .fhash > small { color: var(--scrim-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .done .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
+  .done .actions button { flex: 1 1 auto; white-space: nowrap; }
+  .done .actions .primary { flex-basis: 100%; min-height: 52px; font-size: 17px; }
+  .done .ghost { color: var(--scrim-fg); }
+  .done .support { justify-content: center; color: var(--scrim-muted); }
+  .done .support a { color: #93C5FD; }
+  /* a batch: the summary under the bar, the list of files (filters, rows drawn only where they show) */
+  .batch { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s4); }
+  .batch-sum { flex: 1 1 14em; min-width: 0; margin: 0; font-size: 15px; color: var(--scrim-fg); }
+  /* a batch not wholly received or kept: amber with its alert icon, never green, never alarm red */
+  .batch-sum.bad, .done .verified.bad { color: var(--warn); }
+  .batch .ghost { flex: none; min-height: 44px; padding: 0 var(--s4); color: var(--scrim-fg); font-size: 14px; }
+  .files { display: grid; gap: var(--s2); margin-top: var(--s4); }
+  /* filter chips (pressed to filter) on one line that scrolls sideways; the rows' state badges are not buttons */
+  .filters { display: flex; gap: var(--s2); overflow-x: auto; scrollbar-width: none; padding: 2px; margin: -2px; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters button { flex: none; }
+  .filters button { min-height: 40px; padding: 0 var(--s3); border-radius: 999px; background: transparent; color: var(--scrim-muted); border-color: var(--scrim-line); font-size: 14px; }
+  .filters button[aria-pressed="true"] { background: var(--scrim-fg); color: #0B1220; border-color: var(--scrim-fg); }
+  .filters b { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .flist { position: relative; height: min(42vh, 360px); overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--scrim-line);
+           scrollbar-width: thin; scrollbar-color: var(--scrim-line) transparent; }
+  #live .flist { height: min(26vh, 220px); }
+  /* a short phone: a shorter list, and the sheet scrolls rather than reach above the screen */
+  @media (max-height: 700px) { .flist { height: min(30vh, 220px); } #live .flist { height: min(20vh, 160px); } }
+  .sheet { max-height: 100dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .flist:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  #fspace { position: relative; }
+  .frow { position: absolute; left: 0; right: 0; height: 72px; display: flex; align-items: center; gap: var(--s1); border-bottom: 1px solid var(--scrim-line); }
+  .fmain { flex: 1; min-width: 0; }
+  .fname { font-size: 15px; line-height: 20px; max-height: 40px; overflow: hidden; overflow-wrap: anywhere; word-break: break-all; color: var(--scrim-fg); font-weight: 500; }
+  .fmeta { font-size: 13px; line-height: 18px; color: var(--scrim-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; min-width: 0; }
+  .fmeta .fsize { flex: none; }
+  .fmeta .sep { flex: none; white-space: pre; }
+  /* a state badge: an icon and the state's words, tinted by state (never the colour alone) */
+  .badge { display: inline-flex; align-items: center; gap: 3px; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .badge svg.i { width: 14px; height: 14px; flex: none; stroke-width: 2.4; }
+  .badge.ok { color: var(--good); } .badge.warn { color: var(--warn); } .badge.live { color: var(--lock); } .badge.wait { color: var(--scrim-muted); font-weight: 500; }
+  /* row actions: an icon over its word */
+  .frow button { flex: none; flex-direction: column; gap: 1px; min-height: 52px; width: 52px; padding: 0; border-radius: 12px; background: transparent; color: var(--scrim-fg); border-color: transparent; font-size: 12px; font-weight: 600; line-height: 1; }
+  .frow button:hover { background: rgba(148, 163, 184, 0.14); }
+  .frow button[aria-expanded="true"] { background: var(--scrim-fg); color: #0B1220; }
+  .frow button svg { width: 20px; height: 20px; }
+  .fnone { margin: 0; padding: var(--s4) 0; text-align: center; color: var(--scrim-muted); font-size: 14px; }
+  .fempty { margin: 0; padding: var(--s4) 0; display: flex; align-items: center; justify-content: center; gap: var(--s4); color: var(--scrim-muted); font-size: 14px; }
+  .fempty img { width: 64px; height: auto; border-radius: 12px; }
+  .fempty b { display: block; color: var(--scrim-fg); font-size: 15px; }
+  /* Save all's progress and result: a toast at the foot of the sheet (a bar while saving, a check when done) */
+  .toast { position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--s1) var(--s3); padding: var(--s3) var(--s4);
+           border-radius: var(--radius); background: #1E293B; border: 1px solid var(--scrim-line); box-shadow: 0 8px 24px -8px rgba(0, 0, 0, .6); color: var(--scrim-fg); font-size: 14px; }
+  .toast svg.i { width: 20px; height: 20px; color: var(--lock); }
+  .toast.ok svg.i { color: var(--good); }
+  .toast.bad { border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+  .toast.bad svg.i { color: var(--warn); }
+  .save-msg { margin: 0; color: var(--scrim-fg); font-size: 14px; overflow-wrap: anywhere; }
+  .toast .tbar { grid-column: 2; height: 4px; border-radius: 99px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
+  .toast .tbar i { display: block; height: 100%; width: 0; background: var(--lock); transition: width 160ms ease-out; }
+  /* asked before files not saved are dropped: the safe choice last and focused */
+  dialog.ask-dlg { max-width: min(420px, calc(100vw - 32px)); padding: var(--s5); border: 1px solid var(--scrim-line); border-radius: 20px; background: #111A2E; color: var(--scrim-fg); }
+  dialog.ask-dlg::backdrop { background: rgba(2, 6, 23, 0.6); }
+  dialog.ask-dlg h3 { margin: 0 0 var(--s2); font-size: 18px; line-height: 1.3; }
+  dialog.ask-dlg p { margin: 0 0 var(--s5); color: #CBD5E1; font-size: 15px; }
+  dialog.ask-dlg .row { display: flex; justify-content: flex-end; gap: var(--s3); flex-wrap: wrap; }
+  dialog.ask-dlg .ghost { color: var(--scrim-fg); }
+  #save-got { justify-self: start; min-height: 44px; color: var(--scrim-fg); font-size: 14px; }
+  /* the support card: now and then after a success (DonateGate), below the actions it never covers */
+  .ask { display: grid; gap: var(--s3); padding: var(--s4); border-radius: var(--radius); border: 1px solid var(--scrim-line); background: rgba(148, 163, 184, 0.08); }
+  .ask p { margin: 0; display: flex; gap: var(--s2); align-items: flex-start; color: var(--scrim-fg); font-size: 15px; line-height: 1.45; }
+  .ask p svg { width: 18px; height: 18px; translate: 0 3px; color: var(--accent); }
+  .ask-links { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .ask-links a { flex: 1 1 auto; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--s4); border-radius: 12px;
+                 border: 1px solid color-mix(in srgb, var(--scrim-fg) 35%, transparent); color: var(--scrim-fg); font-weight: 600; text-decoration: none; white-space: nowrap; transition: background 160ms ease-out; }
+  .ask-links a:hover { background: color-mix(in srgb, var(--scrim-fg) 8%, transparent); }
+  .ask-links a:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
+  .ask-later { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
+  .ask-later button { min-height: 44px; padding: 0 var(--s3); background: transparent; color: var(--scrim-muted); font-size: 14px; }
+  .ask-later button:hover { color: var(--scrim-fg); }
+
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; } }
+  @media (min-width: 720px) { .notes { justify-self: center; width: 560px; } }
+  /* a wide window (screen sharing, a tablet): the square sits higher, clear of the floating sheet */
+  @media (min-width: 720px) { .reticle { top: 40%; width: min(78vw, 54vh); } }
+  @media (min-width: 720px) { .sheet { left: 50%; right: auto; width: 560px; transform: translateX(-50%); border-radius: 20px; bottom: var(--s5); } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 12.9a10 10 0 0 1 5.2-2.8"/><path d="M19 12.9a10 10 0 0 0-2.1-1.6"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></symbol>
+  <symbol id="i-again" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.6 1.1 5 2.9 1.4-1.8 3-2.9 5-2.9 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></symbol>
+  <symbol id="i-lens" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><path d="M9 13a3 3 0 0 1 5.2-2"/><path d="M15 13a3 3 0 0 1-5.2 2"/><path d="M14.5 9.5v1.6h-1.6"/><path d="M9.5 16.5v-1.6h1.6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4.5"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><path d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+</svg>
+
+<main id="start">
+  <header class="brand"><b><img src="assets/logo-mark-128.png" alt="" width="32" height="32"><span class="name">Lens<span>Bolt</span></span></b>
+    <nav class="modes" aria-label="Mode"><a href="index.html">Send</a><a href="receive.html" aria-current="page">Receive</a></nav>
+    <button class="ghost" id="theme" type="button" aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button></header>
+  <div class="intro">
+    <h1>Receive files</h1>
+    <p class="lede">Open LensBolt on the computer that has the files and press Start there. Then choose how this device reads its screen.</p>
+    <ul class="facts">
+      <li><svg class="i"><use href="#i-wifi-off"/></svg><span>Nothing leaves this device<small>No network, no upload, no account. The picture stays on the device.</small></span></li>
+      <li><svg class="i"><use href="#i-shield"/></svg><span>Only verified files<small>Each file is offered once its SHA-256 matches the sender's.</small></span></li>
+    </ul>
+  </div>
+  <div class="go-group">
+    <div class="problem" id="problem" role="alert" hidden><svg class="i"><use href="#i-alert"/></svg><div><strong id="problem-title"></strong><p id="problem-text"></p></div></div>
+    <h2 class="ways-h" id="ways-h">How does this device read the sender?</h2>
+    <div class="ways" role="group" aria-labelledby="ways-h">
+      <button class="way" id="go" type="button" aria-labelledby="w-phone" aria-describedby="w-phone-d"><img src="assets/choice-phone.webp" width="800" height="449" alt="A phone held beside a laptop, its camera reading the square of tiles on the laptop's screen."><span><b id="w-phone">Phone camera</b><small id="w-phone-d">This phone reads the computer's screen. On iPhone, use Receive in Safari.</small></span></button>
+      <button class="way" id="go-webcam" type="button" aria-labelledby="w-webcam" aria-describedby="w-webcam-d"><img src="assets/choice-webcam.webp" width="800" height="448" alt="Two laptops facing each other: the webcam of the one on the right reads the tile on the left one's screen."><span><b id="w-webcam">Webcam</b><small id="w-webcam-d">This computer's camera reads another computer's screen: PC to PC.</small></span></button>
+      <button class="way" id="screen" type="button" aria-labelledby="w-share" aria-describedby="w-share-d"><img src="assets/choice-share.webp" width="800" height="481" alt="One monitor showing two windows: the sender's tile in one window, the receiver's progress bar in the other."><span><b id="w-share">Share a window</b><small id="w-share-d">No camera: pick the window on this computer that shows the sender, such as a VM, a remote desktop or a shared screen. The fastest and most reliable way on one machine. <span class="need" id="w-share-need" hidden>Needs a computer's browser.</span></small></span></button>
+    </div>
+    <details class="how" id="how">
+      <summary><svg class="i"><use href="#i-chev"/></svg>How it works</summary>
+      <ol>
+        <li><b>Phone camera.</b> On the phone, open this page (on iPhone: Receive in Safari) or the LensBolt app on Android, and choose Phone camera. Hold the phone so the square on the computer's screen fills most of the picture; the guide says when it reads.</li>
+        <li><b>Webcam, PC to PC.</b> On the computer that receives, open this page and choose Webcam. Turn its camera, or the other laptop, so the sender's square fills most of the picture.</li>
+        <li><b>Share a window, one computer.</b> When a window on this computer shows the sender (a VM, a remote desktop, or another computer's screen shared to this one), choose Share a window and pick that window. Nothing to aim or hold; choose Fastest on the sender.</li>
+      </ol>
+      <p>Each file is offered once its SHA-256 matches the sender's. Nothing is sent back to the sender.</p>
+    </details>
+  </div>
+  <p class="support"><svg class="i"><use href="#i-heart"/></svg><span>Free and offline. If it helped, <a href="https://buymeacoffee.com/akhildara1l" target="_blank" rel="noopener">Buy me a coffee</a> · <a href="https://github.com/sponsors/akhil-dara" target="_blank" rel="noopener">GitHub Sponsors</a>.</span></p>
+</main>
+
+<section id="cam" hidden data-lock="search" aria-label="Camera">
+  <video id="video" playsinline muted autoplay></video>
+  <div class="reticle" aria-hidden="true"><svg viewBox="0 0 100 100"><path d="M4 22V8a4 4 0 0 1 4-4h14M78 4h14a4 4 0 0 1 4 4v14M96 78v14a4 4 0 0 1-4 4H78M22 96H8a4 4 0 0 1-4-4V78"/></svg></div>
+  <div class="head">
+  <div class="top">
+    <span class="pill"><span class="dot"></span><span id="guide">Looking for the LensBolt screen</span></span>
+    <span class="acts">
+      <button class="iconbtn" id="close" type="button" aria-label="Close and go back"><svg class="i"><use href="#i-close"/></svg></button>
+      <button class="iconbtn" id="lens" aria-label="Switch camera" hidden><svg class="i"><use href="#i-lens"/></svg></button>
+      <button class="iconbtn" id="info" aria-label="Show details" aria-pressed="false"><svg class="i"><use href="#i-info"/></svg></button>
+    </span>
+  </div>
+  <div class="notes">
+    <div class="note warn" id="version" role="status" hidden><strong>Different LensBolt version</strong><p id="version-text"></p></div>
+    <div class="note warn" id="banner" role="status" hidden><strong>Sender too fast for this camera</strong><p id="banner-text"></p></div>
+    <div class="note" id="idle" role="status" hidden><strong id="idle-title"></strong><p id="idle-text"></p></div>
+  </div>
+  </div>
+  <div class="sheet" id="sheet">
+    <div id="live">
+      <div class="name wait" id="fname">Waiting for the file name</div>
+      <div class="bar" role="progressbar" aria-label="Received" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bar"><i id="fill"></i></div>
+      <div class="stats">
+        <div><small id="got-unit">Received</small><b class="num" id="got">0</b></div>
+        <div><small>Mbit/s</small><b class="num" id="rate">–</b></div>
+        <div><small>Time left</small><b class="num" id="x">–</b></div>
+      </div>
+      <div class="batch" id="batch" hidden>
+        <p class="batch-sum num" id="batch-sum"></p>
+        <span class="vh" id="batch-say" aria-live="polite"></span>
+        <button class="ghost" id="batch-toggle" type="button" aria-expanded="false" aria-controls="files"><svg class="i"><use href="#i-list"/></svg><span id="batch-toggle-text">Show files</span></button>
+      </div>
+      <div class="files" id="files" hidden>
+        <div class="filters" id="filters" role="group" aria-label="Show files">
+          <button type="button" data-f="all" aria-pressed="true">All <b id="n-all">0</b></button>
+          <button type="button" data-f="received" aria-pressed="false">Received <b id="n-received">0</b></button>
+          <button type="button" data-f="missing" aria-pressed="false">Missing <b id="n-missing">0</b></button>
+          <button type="button" data-f="failed" aria-pressed="false">Failed <b id="n-failed">0</b></button>
+        </div>
+        <div class="flist" id="flist" role="list" aria-label="Files in this transfer" tabindex="0"><div id="fspace"></div></div>
+        <p class="fnone" id="fnone" hidden></p>
+        <p class="fempty" id="fempty" hidden><img src="assets/empty-state.webp" width="480" height="544" alt="Files dropping toward a phone."><span><b>Waiting for the file list</b>It comes with the first data; each file shows here as it arrives.</span></p>
+        <div class="fhash" id="fhash" hidden><small id="fhash-name"></small>
+          <div class="sha"><span class="sha-hex num" id="fhash-hex" aria-hidden="true"></span><span class="vh" id="fhash-say"></span>
+            <button class="ghost" id="fhash-copy" type="button"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button></div></div>
+        <button class="ghost" id="save-got" type="button" hidden><svg class="i"><use href="#i-download"/></svg>Save the files received so far</button>
+        <div class="toast" id="toast" hidden><svg class="i" aria-hidden="true"><use id="toast-icon" href="#i-download"/></svg><p class="save-msg" id="save-msg" role="status"></p><div class="tbar" id="toast-bar" hidden><i id="toast-fill"></i></div></div>
+      </div>
+      <div class="finish" id="finish" hidden>
+        <p id="finish-lead">Type these on the sender to finish faster</p>
+        <div class="finish-row">
+          <span class="words" id="finish-words" aria-live="polite"></span>
+          <button class="ghost" id="copy" type="button" aria-label="Copy the finish words"><svg class="i"><use href="#i-copy"/></svg><span id="copy-text">Copy</span></button>
+          <span id="copy-say" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></span>
+        </div>
+        <p class="parts" id="finish-parts" hidden></p>
+      </div>
+      <dl class="details" id="details" hidden>
+        <dt>Format</dt><dd class="num" id="d-format">–</dd>
+        <dt id="d-camera-t">Camera</dt><dd class="num" id="d-camera">–</dd>
+        <dt>Lens</dt><dd id="d-lens">–</dd>
+        <dt>Zoom</dt><dd class="num" id="d-zoom">–</dd>
+        <dt>Focus</dt><dd class="num" id="d-focus">–</dd>
+        <dt>Exposure</dt><dd class="num" id="d-exposure">–</dd>
+        <dt>Sender</dt><dd class="num" id="d-sender">–</dd>
+        <dt>Decode</dt><dd class="num" id="d-decode">–</dd>
+        <dt>Frames</dt><dd class="num" id="d-frames">–</dd>
+        <dt>Cell size</dt><dd class="num" id="d-cell">–</dd>
+        <dt>Codewords</dt><dd class="num" id="d-codewords">–</dd>
+        <dt>Sharpness</dt><dd class="num" id="d-sharp">–</dd>
+        <dt>Last miss</dt><dd id="d-error">–</dd>
+      </dl>
+    </div>
+    <div class="done" id="done" hidden>
+      <div class="title" id="done-title"><svg class="i"><use id="done-icon" href="#i-check"/></svg><h2 id="done-name"></h2></div>
+      <p class="num" id="done-meta"></p>
+      <p class="verified"><svg class="i"><use id="verified-icon" href="#i-shield"/></svg><span id="verified-text">SHA-256 verified</span></p>
+      <div class="sha" id="sha" hidden>
+        <span class="sha-hex num" id="sha-hex" aria-hidden="true"></span><span class="vh" id="sha-say"></span>
+        <button class="ghost" id="sha-copy" type="button" aria-label="Copy the SHA-256"><svg class="i"><use href="#i-copy"/></svg><span>Copy</span></button>
+      </div>
+      <div class="actions">
+        <button class="primary" id="save"><svg class="i"><use href="#i-download"/></svg><span id="save-text">Save file</span></button>
+        <button class="ghost" id="share"><svg class="i"><use href="#i-share"/></svg>Share</button>
+        <button class="ghost" id="again"><svg class="i"><use href="#i-again"/></svg>Receive another</button>
+      </div>
+      <section class="ask" id="ask" aria-labelledby="ask-text" hidden>
+        <p id="ask-text"><svg class="i" aria-hidden="true"><use href="#i-heart"/></svg><span>LensBolt is free. If it helped, you can support it.</span></p>
+        <div class="ask-links">
+          <a href="https://buymeacoffee.com/akhildara1l" target="_blank" rel="noopener">Buy me a coffee</a>
+          <a href="https://github.com/sponsors/akhil-dara" target="_blank" rel="noopener">GitHub Sponsors</a>
+        </div>
+        <div class="ask-later"><button type="button" id="ask-later">Not now</button><button type="button" id="ask-never">Don't ask again</button></div>
+      </section>
+      <p class="support" id="done-support"><svg class="i"><use href="#i-heart"/></svg><span>Enjoyed this? <a href="https://buymeacoffee.com/akhildara1l" target="_blank" rel="noopener">Buy me a coffee</a> · <a href="https://github.com/sponsors/akhil-dara" target="_blank" rel="noopener">GitHub Sponsors</a></span></p>
+    </div>
+  </div>
+  <dialog class="ask-dlg" id="ask-dlg" aria-labelledby="ask-dlg-t" aria-describedby="ask-dlg-p"><h3 id="ask-dlg-t"></h3><p id="ask-dlg-p"></p>
+    <div class="row"><button class="ghost" id="ask-dlg-no" type="button"></button><button class="primary" id="ask-dlg-yes" type="button" autofocus></button></div></dialog>
+  <div aria-live="polite" class="sr" id="say" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></div>
+</section>
+
+<script type="module">
+// development: the module worker loads ./pkg (the single-file build replaces this block); a fresh URL per page load
+// so a worker cached before web/serve.py's no-store can never run next to a newer page
+const __devLoad = Date.now();
+window.lensboltWorker = () => new Worker(new URL(`./receive-worker.js?v=${__devLoad}`, import.meta.url), { type: 'module' });
+</script>
+<script type="module">
+// the batch view's rules (a module of their own for the node tests; the single-file build inlines them)
+import { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, filterCounts, inFilter, visibleRows, splitName, middleFit, freeName, crc32, zipParts, keptInOrder, Announcer, rowPlan, batchNeed, badge, doneState, discardAsk, filterCountsOf } from './batch-logic.js';
+window.LensBoltBatch = { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, filterCounts, inFilter, visibleRows, splitName, middleFit, freeName, crc32, zipParts, keptInOrder, Announcer, rowPlan, batchNeed, badge, doneState, discardAsk, filterCountsOf };
+</script>
+<script type="module">
+import { ReadTracker, hint, HintHold, toDisplay, floor, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, VersionWatch, PhaseSweep, idleHint, ErrorRun, spaceShort, stopMessage, finishWords, finishParts, FINISH_TEXT, DonateGate, shareHint, idleShare } from './receive-logic.js';
+import { readerCount, ReaderPool } from './receive-pool.js';
+import { shaShown, shaSpoken, shaLines } from './sha-text.js';
+const $ = (id) => document.getElementById(id);
+const clock = (s) => s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+const human = (b) => b >= 1 << 30 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1 << 20 ? (b / 1048576).toFixed(1) + ' MB' : b >= 1024 ? Math.round(b / 1024) + ' KB' : b + ' B';
+function problem(title, text) { $('problem-title').textContent = title; $('problem-text').textContent = text; $('problem').hidden = false; }
+// the browser's own words for a failure, as one sentence
+const reason = (err) => { const m = String(err && (err.message || err.name) || err || '').trim(); return m ? (/[.!?]$/.test(m) ? m : m + '.') : 'The browser gave no reason.'; };
+
+let worker = null, stream = null, busy = false, running = false, file = null, lastSay = '', startedAt = 0, pumps = 0;
+// the page and its worker must speak the same protocol (receive-worker.js PROTO); a worker that never answers a
+// frame is given up on after BUSY_MS, and after STALLS such frames in a row the page says so instead of freezing
+const PROTO = 2, BUSY_MS = 5000, STALLS = 3;
+let busyAt = 0, stalls = 0;
+// a receiving run (from each 'ready'): its error run and its one space check
+const run = { errors: new ErrorRun(), peakChecked: -1, stopping: false };
+function workerReady(m) {
+  // every receiver the worker starts begins with an empty batch view (a run stopped half way leaves nothing behind),
+  // and the run's number: messages of a run before are ignored
+  if (m.proto === PROTO) { run.errors = new ErrorRun(); run.peakChecked = -1; run.stopping = false; resetBatch(); bv.gen = m.gen; return true; }
+  stopWith('Reload this page', 'This page and its decoder are from different versions. Reload the page to load both again.');
+  return false;
+}
+// a failure while the camera runs: back to the start screen (where problems show), camera off
+function stopWith(title, text) {
+  running = false; paintNext = null;
+  if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+  if (worker) { worker.terminate(); worker = null; }
+  stopReaders();
+  cam.track = null; wakeLock(false);
+  $('cam').hidden = true; $('start').hidden = false; $('go').disabled = false;
+  problem(title, text);
+}
+
+// the decode worker; one that fails before its first answer (a browser that will not run it, e.g. this single file
+// opened from disk in Chrome) ends the receiving with a message instead of a screen that waits forever
+function newWorker() {
+  const w = window.lensboltWorker();
+  if (w.addEventListener) {
+    let answered = false;
+    w.addEventListener('message', () => { answered = true; });
+    w.addEventListener('error', (e) => {
+      if (answered || w !== worker) return;
+      if (e.preventDefault) e.preventDefault();
+      stopWith('The decoder did not start', location.protocol === 'file:'
+        ? 'This browser does not run it from a file on the device. Open lensbolt.com/receive, or serve this file from localhost.'
+        : 'Reload this page to try again.');
+    });
+  }
+  return w;
+}
+
+function say(text) { if (text !== lastSay) { lastSay = text; $('say').textContent = text; } }
+
+// ---- reader workers: where the device has cores to spare, R workers read camera frames side by side and the decode
+// worker collects their records (web/receive-pool.js has the rules). Until a reader is ready, on a device with two
+// cores or fewer, and when a reader does not start, the decode worker reads the frames itself as before.
+// ?readers=N forces N readers (0: the single worker).
+let pool = null, readers = [], collectorAt = 0;
+function stopReaders() { for (const w of readers) { try { w.terminate(); } catch (e) {} } readers = []; pool = null; }
+// the single worker takes the frames again
+function giveUpReaders() { stopReaders(); busy = false; }
+function startReaders() {
+  stopReaders();
+  // ?readers=N forces N; ?readers with no number is the device's own count
+  const forced = (params.get('readers') || '').trim();
+  const n = readerCount(navigator.hardwareConcurrency || 0, forced ? Number(forced) : NaN, navigator.deviceMemory || 0);
+  if (!n) return;
+  const mine = pool = new ReaderPool(n, { busyMs: BUSY_MS });
+  for (let i = 0; i < n; i++) {
+    let w;
+    try { w = window.lensboltWorker(); } catch (e) { giveUpReaders(); return; }
+    readers.push(w);
+    w.onmessage = (ev) => { if (pool === mine) readerMessage(i, ev.data); };
+    if (w.addEventListener) w.addEventListener('error', (e) => { if (pool !== mine) return; if (e.preventDefault) e.preventDefault(); readerFailed(i); });
+    w.postMessage({ type: 'init', role: 'reader', wasm: window.lensboltWasm });
+  }
+}
+// a reader that did not start or stopped: its frame given up on (what waited for it goes on), the worker ended; the
+// single worker again once no reader is left, started or starting
+function readerFailed(i) {
+  const x = pool.failed(i);
+  try { readers[i].terminate(); } catch (e) {}
+  toCollector(x.deliver);
+  if (x.fallback) giveUpReaders();
+}
+function readerMessage(i, m) {
+  // a worker that does not speak the reader role is a reader that did not start
+  if (m.type === 'ready') { if (m.role === 'reader' && m.proto === PROTO) pool.ready(i); else readerFailed(i); }
+  else if (m.type === 'read' && m.error) {
+    // a reader that threw on a frame: that frame is skipped, the reader left out, the others carry on
+    $('d-error').textContent = m.error;
+    toCollector(pool.done(i, m.seq, { seq: m.seq, skip: true }, performance.now()));
+    readerFailed(i);
+  }
+  else if (m.type === 'read') { stalls = 0; toCollector(pool.done(i, m.seq, m, performance.now())); }
+  else readerFailed(i);
+}
+// reader results to the decode worker as they finish (dropped once receiving has stopped: the file is complete)
+function toCollector(results) {
+  for (const r of results) {
+    if (!running || !worker || !pool || r.skip) continue;
+    if (!r.record) continue;
+    if (!pool.pending) collectorAt = performance.now();
+    pool.toCollector();
+    worker.postMessage({ type: 'read', record: r.record, t: r.t, ms: r.ms, camera: r.camera, frame: r.frame, rotation: r.rotation, seq: r.seq }, [r.record.buffer]);
+  }
+}
+// every status from the decode worker: a collected record answered, the pool's numbers for Details
+let reanchorsSeen = 0;
+function statusIn(s) {
+  // the collector counted a re-anchor (frames reading few codewords while the tile is seen): every pooled reader
+  // forgets its geometry with its next frame
+  if (pool && s.reanchors > reanchorsSeen) { reanchorsSeen = s.reanchors; pool.reanchor(); }
+  // corners and frame as the picture shows them (a frame tagged with a turn is read in its coded planes)
+  if (s.rotation) { const d = toDisplay(s.corners, s.frame, s.rotation); s.corners = d.corners; s.frame = d.frame; }
+  if (pool && s.seq != null) { pool.answered(); collectorAt = performance.now(); }
+  if (pool && pool.active) s.pool = pool.stats();
+}
+// one camera frame to the first idle reader (none idle: dropped and counted); a reader or the collector silent for
+// BUSY_MS counts as a stall, and STALLS in a row stop receiving with a message instead of a frozen screen
+function pumpReaders(video) {
+  const now = performance.now();
+  const x = pool.expire(now);
+  // one stall per check, however many readers were silent (several frames in flight stall together, e.g. a page that
+  // was in the background)
+  if (x.stalled) { if (++stalls >= STALLS) { stopWith('The decoder stopped answering', 'Reload this page to start it again.'); return; } toCollector(x.deliver); }
+  if (pool.pending && now - collectorAt > BUSY_MS) { collectorAt = now; if (++stalls >= STALLS) { stopWith('The decoder stopped answering', 'Reload this page to start it again.'); return; } }
+  if (video.readyState < 2) return;
+  // as many readers take frames as the camera's rate needs at their turn (copy, decode, messages)
+  pool.fit(1000 / (cam.fps > 0 ? cam.fps : +cam.settings.frameRate || 30));
+  const pick = pool.offer(now);
+  if (!pick) return;
+  const w = readers[pick.reader], msg = { seq: pick.seq, t: now, hint: pick.hint };
+  let frame = null;
+  if (typeof VideoFrame === 'function' && !video.src) { try { frame = new VideoFrame(video, { timestamp: Math.round(now * 1000) }); } catch (e) { frame = null; } }
+  if (frame) w.postMessage({ type: 'vframe', frame, ...msg }, [frame]);
+  else {
+    const mine = pool;
+    createImageBitmap(video).then((bitmap) => w.postMessage({ type: 'frame', bitmap, ...msg }, [bitmap]))
+      .catch(() => { if (pool === mine) toCollector(pool.done(pick.reader, pick.seq, { seq: pick.seq, skip: true }, performance.now())); });
+  }
+}
+
+// ---- the live camera: zoom, focus, lens, frame rate, its settings read back ----
+const params = new URLSearchParams(location.search);
+const cam = { track: null, size: {}, refits: 0, caps: {}, settings: {}, zoom: 1, zoomAt: -Infinity, zoomNote: '', unchanged: 0, limits: null, refocuses: 0, focusNote: '', fps: 0, fpsFrames: 0, fpsT0: 0, lenses: [], lens: '' };
+// auto zoom's limits per lens (deviceId): what one lens learned (a zoom that lost the square) is kept for it
+const zoomLimits = new Map();
+let lastStatus = null;
+const tracker = { r: new ReadTracker(), focus: new FocusWatch(), banner: new FpsBanner(), version: new VersionWatch(), hold: new HintHold(600), sweep: new PhaseSweep() };
+function zoomCaps() {
+  const z = cam.caps.zoom;
+  return z && z.max > z.min && !cam.zoomNote && cam.limits ? cam.limits.caps() : null;
+}
+function readSettings() {
+  if (!cam.track) return;
+  try { cam.settings = cam.track.getSettings ? cam.track.getSettings() : {}; } catch (e) { cam.settings = {}; }
+  // the size went back up after a focus or zoom change (a camera that drops a size it was given): brought down
+  // again, a few times per track at most
+  if (cam.settings.width * cam.settings.height > CAMERA_MAX_PX && cam.refits < 3) { cam.refits++; fitSize(cam.track).then(() => { if (cam.track) { try { cam.settings = cam.track.getSettings(); } catch (e) {} showCamera(); } }); }
+  if (cam.settings.zoom != null) cam.zoom = cam.settings.zoom;
+  showCamera();
+}
+// the track's own settings after every change, in Details: what the camera really does, not what was asked
+function showCamera() {
+  if (!cam.track) return;
+  const st = cam.settings, z = cam.caps.zoom;
+  const size = st.width && st.height ? `${st.width}x${st.height}` : '–';
+  const fps = cam.fps > 0 ? `${cam.fps.toFixed(1)} fps measured` : st.frameRate ? `${(+st.frameRate).toFixed(0)} fps set` : '';
+  // what the camera offers (the 60 fps request takes only where this reaches 60 at the size in force)
+  const fr = cam.caps && cam.caps.frameRate && cam.caps.frameRate.max > 0 ? `camera up to ${Math.round(cam.caps.frameRate.max)} fps${cam.fast ? ', 60 asked' : ''}` : '';
+  $('d-camera').textContent = [size, fps, fr, cam.sweepNote || ''].filter(Boolean).join(' · ');
+  $('d-lens').textContent = cam.lens || cam.track.label || '–';
+  const lim = zoomCaps();
+  $('d-zoom').textContent = z ? `${(+cam.zoom).toFixed(1)}x of ${z.min}-${z.max}${cam.zoomNote ? ' · ' + cam.zoomNote : lim ? ` · auto ${lim.min}-${lim.max}x` : ' · auto off'}` : 'not offered by this camera';
+  const focus = st.focusMode ? st.focusMode + (st.focusDistance != null ? ` · distance ${(+st.focusDistance).toFixed(2)}` : '') : 'not reported';
+  $('d-focus').textContent = `${focus} · ${cam.refocuses} refocus${cam.refocuses === 1 ? '' : 'es'}${cam.focusNote ? ' · ' + cam.focusNote : ''}`;
+  // exposureTime is in 100 µs units in the Media Capture spec
+  const exp = st.exposureTime != null ? `${(st.exposureTime / 10).toFixed(1)} ms` : '';
+  $('d-exposure').textContent = [exp, st.exposureMode, st.iso != null ? `ISO ${st.iso}` : ''].filter(Boolean).join(' · ') || 'not reported';
+}
+// the camera opened again on the same lens (the phase search): the stream changes, the receiver and what it has
+// received stay, as for a lens switch
+let rerolling = false;
+async function reroll() {
+  if (rerolling || !cam.track || !stream) return;
+  rerolling = true;
+  const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
+  cam.sweepNote = `timing: camera restarted (${tracker.sweep.rerolls})`;
+  try {
+    for (const t of stream.getTracks()) t.stop();
+    cam.track = null;
+    await useStream(await openCamera(cur));
+  } catch (err) { stopWith('The camera did not start again', `${reason(err)} Tap Start camera.`); }
+  finally { rerolling = false; showCamera(); }
+}
+// one change to the track; its settings are read back whatever happened
+async function constrain(c) {
+  if (!cam.track) return 'no camera';
+  try { await cam.track.applyConstraints({ ...cam.size, advanced: [c] }); return true; }
+  catch (e) { return String(e && e.name || e); }
+  finally { readSettings(); }
+}
+async function setupTrack(track) {
+  cam.track = track; cam.refits = 0; cam.zoomNote = ''; cam.unchanged = 0; cam.focusNote = ''; cam.zoomAt = -Infinity; cam.limits = null;
+  try { cam.caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { cam.caps = {}; }
+  cam.lens = track.label || '';
+  tracker.focus = new FocusWatch();
+  readSettings();
+  // continuous focus where the camera offers a choice. Zoom starts where the track starts (never under 1x: a
+  // camera offering less may switch to its ultrawide there) and goes no further than 3x
+  if ((cam.caps.focusMode || []).includes('continuous')) await constrain({ focusMode: 'continuous' });
+  const z = cam.caps.zoom, id = (cam.settings.deviceId || '') + '|' + cam.lens;
+  if (z && z.max > z.min) {
+    if (!zoomLimits.has(id)) zoomLimits.set(id, new ZoomLimits({ min: z.min, max: z.max, step: z.step || 0.1 }, cam.settings.zoom));
+    cam.limits = zoomLimits.get(id);
+    cam.limits.set = null; // a zoom set on the previous track says nothing about this one
+    if (cam.zoom < cam.limits.base - 1e-6) await constrain({ zoom: cam.limits.base });
+  }
+}
+let zooming = false;
+async function applyZoom(z) {
+  if (zooming) return;
+  zooming = true;
+  const was = cam.zoom;
+  cam.zoomAt = performance.now();
+  const ok = await constrain({ zoom: z });
+  // a camera that lists zoom but refuses it, or twice in a row does not change: stop asking (Details says why)
+  if (ok !== true) cam.zoomNote = `zoom refused (${ok})`;
+  else if (Math.abs(cam.zoom - was) < 1e-6 && Math.abs(z - was) > 1e-6) { if (++cam.unchanged >= 2) cam.zoomNote = 'zoom did not change'; }
+  else cam.unchanged = 0;
+  cam.zoomAt = performance.now();
+  if (ok === true && cam.limits && cam.zoom > was + 1e-6) cam.limits.zoomed(cam.zoom, cam.zoomAt);
+  zooming = false;
+  showCamera();
+}
+// a single-shot refocus at `pt` (0..1 of the picture) where the camera has one, then back to continuous
+async function refocus(pt) {
+  const modes = cam.caps.focusMode || [], c = {};
+  if (pt && 'pointsOfInterest' in cam.caps) c.pointsOfInterest = [pt];
+  if (modes.includes('single-shot')) c.focusMode = 'single-shot';
+  else if (c.pointsOfInterest && modes.includes('continuous')) c.focusMode = 'continuous';
+  // neither a one-shot focus nor a point to focus on: nothing a refocus could change
+  if (!Object.keys(c).length) { cam.focusNote = 'no focus control'; showCamera(); return; }
+  cam.refocuses++;
+  const ok = await constrain(c);
+  if (ok !== true) cam.focusNote = `refocus refused (${ok})`;
+  if (c.focusMode === 'single-shot' && modes.includes('continuous')) setTimeout(() => constrain({ focusMode: 'continuous' }), 1500);
+}
+function tileCentre(s) {
+  const c = s.corners, f = s.frame;
+  if (!c || !f) return null;
+  return { x: (c[0] + c[2] + c[4] + c[6]) / 4 / f[0], y: (c[1] + c[3] + c[5] + c[7]) / 4 / f[1] };
+}
+// the camera's rate: frames the video element presents per second
+function countFrames(video, gen) {
+  if (!video.requestVideoFrameCallback) return;
+  // presentedFrames: the frames the camera delivered, counted by the compositor; a main thread busy for a while misses
+  // callbacks, not frames, and must not read as a slow camera (the "sender too fast" banner follows this rate)
+  video.requestVideoFrameCallback((now, meta) => {
+    if (!running || gen !== pumps) return;
+    const n = meta && meta.presentedFrames != null ? meta.presentedFrames : null;
+    if (!cam.fpsT0) { cam.fpsT0 = now; cam.fpsFrames = 0; cam.fpsBase = n; }
+    else if (n == null) cam.fpsFrames++;
+    else cam.fpsFrames = n - cam.fpsBase;
+    if (now - cam.fpsT0 >= 1000) { cam.fps = cam.fpsFrames * 1000 / (now - cam.fpsT0); cam.fpsFrames = 0; cam.fpsT0 = now; cam.fpsBase = n; showCamera(); }
+    countFrames(video, gen);
+  });
+}
+// the screen stays on while receiving (released when done or stopped; the browser drops it while hidden)
+let wake = null;
+async function wakeLock(on) {
+  try {
+    if (on && !wake && navigator.wakeLock && document.visibilityState === 'visible') {
+      const w = await navigator.wakeLock.request('screen');
+      // the transfer may have ended (or another request won) while the request was pending
+      if (!running || wake) { await w.release(); return; }
+      wake = w; w.addEventListener('release', () => { if (wake === w) wake = null; });
+    }
+    else if (!on && wake) { const w = wake; wake = null; await w.release(); }
+  } catch (e) { wake = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (running && cam.track) wakeLock(true);
+  // a hidden page gets no frames and no answers: the readers' and the collector's time starts again now
+  if (pool) { pool.resume(performance.now()); collectorAt = performance.now(); }
+});
+
+// what every status does to the camera: zoom toward a square that fills ~80% of the picture, refocus when it
+// reads badly although its cells are large enough. Returns whether zoom is about to make a small square bigger.
+function control(s, r, now) {
+  if (!cam.track) return false;
+  const found = tracker.r.readAt === now;
+  if (cam.limits && cam.limits.update(found, now, s.last_error)) showCamera();
+  const zc = zoomCaps();
+  const reads = r.codewords > 0 && r.codewordsOk >= r.codewords * 0.9;
+  let canHelp = false;
+  if (zc) {
+    const next = zooming ? null : zoomStep({ z: cam.zoom, caps: zc, corners: s.corners, frame: s.frame, found, lostMs: now - tracker.r.readAt, sinceChangeMs: now - cam.zoomAt, reads });
+    if (next !== null && Math.abs(next - cam.zoom) > 1e-6) applyZoom(next);
+    canHelp = r.fill > 0 && r.fill < ZOOM.START_BELOW && cam.zoom < zc.max - zc.step / 2 && ((next !== null && next > cam.zoom) || zooming || now - cam.zoomAt < ZOOM.SETTLE_MS * 2);
+  }
+  if (tracker.focus.update({ found, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness || 0, zoom: cam.zoom, format: s.format || null, mix: r.mix, edgePx: r.edgePx, now })) refocus(tileCentre(s));
+  // the screen's timing: the camera is opened again (a new, random capture phase) until the reads come whole
+  if (cam.track && !cam.fast && !rerolling) {
+    const ask = tracker.sweep.update({ now, newData: r.newData, mix: r.mix, whole: reads, collapsed: r.collapsed, senderFps: s.sender_fps || 0, camFps: cam.fps || 0 });
+    if (ask && ask.reroll) reroll();
+  }
+  return canHelp;
+}
+
+// the storage this page may use, as the browser estimates it (null where it gives none)
+async function estimate() {
+  try { return navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null; } catch (e) { return null; }
+}
+// receiving cannot go on: no more frames, then plain words on the start screen (Start camera tries again)
+async function halt(short, own) {
+  run.stopping = true; running = false;
+  const m = stopMessage(short ? null : await estimate(), own, short);
+  stopWith(m.title, m.text);
+}
+// once the manifest gives the size: too little space stops now, with how much is needed, not halfway through
+async function checkSpace(s) {
+  // a batch: each file is copied out of the receiver's store into a file of its own, so the largest file once more
+  const largest = s.batch && s.batch.total ? (await wholeList()).reduce((m, f) => Math.max(m, (f && f.size) || 0), 0) : 0;
+  const short = spaceShort({ estimate: await estimate(), own: s.store_bytes || 0, streamSize: s.stream_size, diskPeak: s.batch ? B().batchNeed(s.disk_peak, largest) : s.disk_peak });
+  if (short && running && !run.stopping) halt(short, s.store_bytes || 0);
+}
+
+// statuses come with every frame read (the camera's rate, and more than one in flight with readers); the page shows
+// at most one every PAINT_MS, the newest: each render lays the page out again, and at 30 a second that was ~40% of a
+// phone-class main thread (4x slowed laptop, 2026-11-02), the thread that also paces the frames to the readers.
+// Errors and the end show at once, after the one waiting (an error run counts statuses in order).
+const PAINT_MS = 200;
+let paintAt = -Infinity, paintTimer = 0, paintNext = null;
+function paint(s) {
+  if (s.error || s.complete || s.receiver_error) { flushPaint(); paintAt = performance.now(); render(s); return; }
+  paintNext = s;
+  const wait = paintAt + PAINT_MS - performance.now();
+  if (wait <= 0) flushPaint(); else if (!paintTimer) paintTimer = setTimeout(flushPaint, wait);
+}
+function flushPaint() {
+  if (paintTimer) { clearTimeout(paintTimer); paintTimer = 0; }
+  const s = paintNext; paintNext = null;
+  if (s && running) { paintAt = performance.now(); render(s); }
+}
+function render(s) {
+  if (run.stopping) return;
+  // a receiver or decoder error twice in a row (a full storage, a trapped decoder): stop, never freeze
+  if (run.errors.update(s)) { halt(null, s.store_bytes || 0); return; }
+  if (s.error) { $('d-error').textContent = s.error; return; }
+  // the space it needs, checked again when that changes (a batch's file list gives its real size)
+  if (s.have_manifest && s.stream_size && s.storage === 'opfs' && run.peakChecked !== s.disk_peak && running) { run.peakChecked = s.disk_peak; checkSpace(s); }
+  const now = performance.now();
+  const r = tracker.r.update(s, now);
+  lastStatus = s;
+  const canHelp = control(s, r, now);
+  r.phaseFixing = tracker.sweep.fixing;
+  const g = tracker.hold.next(cam.mode === 'screen' ? shareHint(r) : hint(r, canHelp), now);
+  $('cam').dataset.lock = g.lock;
+  if (!String(s.camera || '').startsWith('self-test')) $('guide').textContent = g.text;
+  say(g.text);
+  // the sender shows frames faster than this camera takes them (held 2 s after it clears)
+  const banner = tracker.banner.update(s.sender_fps || 0, cam.track ? cam.fps || +cam.settings.frameRate || 0 : 0, now);
+  // the sender is another LensBolt version: nothing decodes until both ends are the same version (it comes first)
+  const version = tracker.version.update(r, now);
+  $('version').hidden = !version; if (version && $('version-text').textContent !== version) $('version-text').textContent = version;
+  $('banner').hidden = !banner || !!version; if (banner) $('banner-text').textContent = banner;
+  const seen = { now, startedAt, seenAt: tracker.r.seenAt, firstSeenAt: tracker.r.firstSeenAt, progressAt: tracker.r.progressAt, complete: !!s.complete };
+  const idle = cam.mode === 'screen' ? idleShare(seen) : cam.track ? idleHint({ ...seen, lenses: cam.lenses.length }) : null;
+  $('idle').hidden = !idle || !!version; if (idle) { $('idle-title').textContent = idle.title; $('idle-text').textContent = idle.text; }
+  if (s.filename) { $('fname').textContent = s.filename; $('fname').classList.remove('wait'); }
+  renderBatch(s);
+  const pct = s.stream_size ? Math.min(100, 100 * s.received_bytes / s.stream_size) : 0;
+  $('fill').style.width = pct.toFixed(1) + '%';
+  $('bar').setAttribute('aria-valuenow', pct.toFixed(0));
+  if (s.stream_size) {
+    const [div, unit] = s.stream_size >= 1 << 30 ? [1073741824, 'GB'] : s.stream_size >= 1 << 20 ? [1048576, 'MB'] : [1024, 'KB'];
+    const f = (b) => (b / div).toFixed(div === 1024 ? 0 : 1);
+    $('got').textContent = `${f(s.received_bytes)} / ${f(s.stream_size)}`;
+    $('got-unit').textContent = `Received (${unit})`;
+  }
+  $('rate').textContent = s.mbit_per_s > 0 ? s.mbit_per_s.toFixed(2) : '–';
+  // the parts still missing, as words to type on the sender (optional: the file arrives without them); the text
+  // changes only when the words do, so a selection the user is making stays
+  const words = finishWords(s);
+  $('finish').hidden = !words;
+  if (words && $('finish-words').textContent !== words) $('finish-words').textContent = words;
+  // and the parts they name, small, under them (what the sender will send: "Parts 7, 12–15, 30")
+  const parts = finishParts(s);
+  $('finish-parts').hidden = !parts;
+  if (parts && $('finish-parts').textContent !== parts) $('finish-parts').textContent = parts;
+  // time left at the measured rate (unique data received so far over the time since the first decoded frame)
+  $('x').textContent = s.mbit_per_s > 0 && s.stream_size ? clock(Math.max(0, s.stream_size - s.received_bytes) * 8 / (s.mbit_per_s * 1e6)) : '–';
+  $('d-format').textContent = s.format || '–';
+  // with reader workers: how many read, each one's decode time, and the camera frames dropped while all were busy
+  const pl = s.pool;
+  $('d-decode').textContent = s.decode_ms != null ? s.decode_ms.toFixed(0) + ' ms per frame' + (pl ? ` · ${pl.taking < pl.readers ? `${pl.taking} of ` : ''}${pl.readers} reader${pl.readers === 1 ? '' : 's'} (${pl.ms.join(', ')} ms) · ${pl.dropped} of ${pl.offered} dropped: readers busy` : '') : '–';
+  $('d-frames').textContent = `${s.decoded} decoded of ${s.frames}`;
+  $('d-cell').textContent = s.cell_px ? `${s.cell_px.toFixed(2)} camera px (reads from ${floor(r.pitch, r.bw)})` + (r.fill > 0 ? ` · square ${Math.round(r.fill * 100)}% of the picture` : '') : '–';
+  $('d-codewords').textContent = s.codewords ? `${s.codewords_ok} of ${s.codewords}` : '–';
+  $('d-sharp').textContent = s.sharpness ? (+s.sharpness).toFixed(1) : '–';
+  $('d-sender').textContent = s.sender_fps > 0 ? `${s.sender_fps.toFixed(1)} fps` : 'not measured yet';
+  $('d-error').textContent = s.receiver_error || s.last_error || '–';
+  if (cam.track) showCamera();
+  else $('d-camera').textContent = s.camera || '–';
+  if (s.storage) $('d-camera').textContent += ` · ${s.storage === 'opfs' ? 'saving to device storage' : 'in memory'}`;
+}
+
+// the verified file from the worker's OPFS store: a disk-backed File, never copied into memory
+async function storedFile(name, store) {
+  const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('lensbolt');
+  return new File([await (await dir.getFileHandle(store)).getFile()], name || 'file', { type: 'application/octet-stream' });
+}
+async function sameBytes(f, expected) {
+  if (f.size !== expected.length) return false;
+  const got = new Uint8Array(await f.arrayBuffer());
+  for (let i = 0; i < got.length; i++) if (got[i] !== expected[i]) return false;
+  return true;
+}
+// the support card: counted per successful transfer (a self-test counts only with ?count, for tests); shown now and
+// then (DonateGate: at most every fifth success, never two in a row), in place of the small support line
+const storage = () => { try { return window.localStorage; } catch (e) { return null; } };
+const donate = new DonateGate(storage());
+function showAsk(on) { $('ask').hidden = !on; $('done-support').hidden = on; }
+$('ask-later').addEventListener('click', () => { showAsk(false); $('save').focus(); });
+$('ask-never').addEventListener('click', () => { donate.never(); showAsk(false); $('save').focus(); });
+// a SHA-256 into a hash block (its groups shown, its spoken form for screen readers); false when there is none
+function showSha(hex, shown, spoken) {
+  const t = shaShown(hex);
+  shaLines($(shown), hex); $(spoken).textContent = shaSpoken(hex);
+  return !!t;
+}
+// Copy: the 64 digits to the clipboard, or selected where the clipboard is refused
+async function copySha(hex, el, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(hex); ok = true; } catch (e) {}
+  if (!ok) { const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  const label = btn.querySelector('span');
+  label.textContent = ok ? 'Copied' : 'Selected';
+  say(ok ? 'SHA-256 copied' : 'SHA-256 selected: copy it with the browser');
+  setTimeout(() => { label.textContent = 'Copy'; }, 1600);
+}
+let doneSha = '';
+$('sha-copy').addEventListener('click', () => copySha(doneSha, $('sha-hex'), $('sha-copy')));
+function showDone(name, bytes, s, counted = true, sha = '') {
+  showAsk(counted && donate.afterTransfer());
+  doneSha = sha || '';
+  $('sha').hidden = !showSha(doneSha, 'sha-hex', 'sha-say');
+  file = bytes instanceof File ? bytes : new File([bytes], name || 'file', { type: 'application/octet-stream' });
+  $('live').hidden = true; $('done').hidden = false; $('idle').hidden = true; $('banner').hidden = true; $('version').hidden = true;
+  $('done-name').textContent = file.name;
+  // the rate of the transfer itself: the stream (the bytes that crossed, compressed or not) over the receiving time
+  s = s || lastStatus;
+  const secs = s && s.seconds ? s.seconds : (performance.now() - startedAt) / 1000;
+  const mbit = (s && s.stream_size ? s.stream_size : file.size) * 8 / secs / 1e6;
+  $('done-meta').textContent = `${human(file.size)} in ${secs.toFixed(1)} s · ${mbit.toFixed(2)} Mbit/s`;
+  $('share').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
+  $('cam').dataset.lock = 'good'; $('guide').textContent = 'Received';
+  say(`Received ${file.name}, verified`);
+  running = false; wakeLock(false);
+  $('save').focus();
+}
+
+// one frame to the worker at a time; `gen`: a newer pump (another lens, another start) ends this one
+function pump(video, gen = ++pumps) {
+  if (!running || gen !== pumps) return;
+  const next = () => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => pump(video, gen)) : requestAnimationFrame(() => pump(video, gen)));
+  if (pool && pool.active) { pumpReaders(video); if (running && gen === pumps) next(); return; }
+  if (busy && performance.now() - busyAt > BUSY_MS) {
+    busy = false;
+    if (++stalls >= STALLS) { stopWith('The decoder stopped answering', 'Reload this page to start it again.'); return; }
+  }
+  if (!busy && video.readyState >= 2) {
+    busy = true; busyAt = performance.now();
+    // the camera's planes as they are (VideoFrame); an ImageBitmap only where the browser has no VideoFrame
+    let frame = null;
+    if (typeof VideoFrame === 'function' && !video.src) { try { frame = new VideoFrame(video, { timestamp: Math.round(performance.now() * 1000) }); } catch (e) { frame = null; } }
+    if (frame) worker.postMessage({ type: 'vframe', frame, t: performance.now() }, [frame]);
+    else createImageBitmap(video).then((bitmap) => worker.postMessage({ type: 'frame', bitmap, t: performance.now() }, [bitmap])).catch(() => { busy = false; });
+  }
+  next();
+}
+
+// ?camfile=<video url>: a recorded or simulated camera (tools/phone_sim.py frames as H.264) instead of the live
+// camera, through the same video -> ImageBitmap -> worker path; for tests in a browser without a camera
+async function startFromFile(url) {
+  const video = $('video');
+  video.src = url; video.loop = true; video.muted = true;
+  await video.play().catch(() => {});
+  worker = newWorker();
+  startReaders();
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (batchMessage(m)) return;
+    if (m.type === 'ready') { if (!workerReady(m)) return; running = true; busy = false; stalls = 0; startedAt = performance.now(); pump(video); }
+    else if (m.type === 'status') { busy = false; stalls = 0; statusIn(m.status); m.status.camera = `video file ${video.videoWidth}x${video.videoHeight}`; paint(m.status); if (m.status.complete) running = false; }
+    else if (m.type === 'file') { showDone(m.name, m.bytes, null, true, m.sha256); }
+    else if (m.type === 'stored') { storedFile(m.name, m.store).then((f) => showDone(m.name, f, null, true, m.sha256)); }
+  };
+  worker.postMessage({ type: 'init', wasm: window.lensboltWasm, memory: params.has('memory') });
+  $('start').hidden = true; $('cam').hidden = false;
+}
+const camfile = params.get('camfile');
+if (camfile) startFromFile(camfile);
+
+// a screen or window shared with the page (a sender inside a VM or remote desktop): the same pipeline as the
+// camera, reading screen pixels instead of a photo of them
+async function startScreen() {
+  $('problem').hidden = true;
+  try {
+    // native pixels: no rescaling of the captured window (a resampled capture blurs small cells)
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, resizeMode: 'none', width: { max: 7680 }, height: { max: 4320 } }, audio: false });
+  } catch (err) {
+    if (err && err.name === 'NotAllowedError') return problem('Screen sharing was cancelled', 'Choose the window that shows the LensBolt sender, then try again.');
+    return problem('Screen sharing did not start', `${reason(err)} Try again, or use Start camera.`);
+  }
+  cam.mode = 'screen'; $('cam').dataset.src = 'screen'; $('d-camera-t').textContent = 'Window';
+  const video = $('video');
+  video.srcObject = stream;
+  video.style.objectFit = 'contain';
+  await video.play().catch(() => {});
+  worker = newWorker();
+  startReaders();
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (batchMessage(m)) return;
+    if (m.type === 'ready') { if (!workerReady(m)) return; running = true; busy = false; stalls = 0; startedAt = performance.now(); pump(video); }
+    else if (m.type === 'status') { busy = false; stalls = 0; statusIn(m.status); m.status.camera = `${video.videoWidth}x${video.videoHeight} captured · ${m.status.decoded} of ${m.status.frames} frames read`; paint(m.status); if (m.status.complete) running = false; }
+    else if (m.type === 'file') { showDone(m.name, m.bytes, null, true, m.sha256); }
+    else if (m.type === 'stored') { storedFile(m.name, m.store).then((f) => showDone(m.name, f, null, true, m.sha256)); }
+  };
+  worker.postMessage({ type: 'init', wasm: window.lensboltWasm, memory: params.has('memory') });
+  // sharing stopped from the browser's own bar: back to the start screen with what to do, unless the files are in
+  stream.getVideoTracks()[0].addEventListener('ended', () => { if ($('done').hidden && !$('cam').hidden) stopWith('Screen sharing stopped', 'Choose Share a window to start again, and pick the window that shows the sender.'); });
+  $('start').hidden = true; $('cam').hidden = false;
+}
+
+// the cameras that can see the sender (labels exist only after permission): front cameras face the user, so they
+// are left out when the labels say which is which
+async function listLenses() {
+  try {
+    const all = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    const back = all.filter((d) => !/front|user/i.test(d.label));
+    cam.lenses = back.length ? back : all;
+  } catch (e) { cam.lenses = []; }
+  $('lens').hidden = cam.lenses.length < 2;
+  const cur = cam.track && cam.track.getSettings ? cam.track.getSettings().deviceId : '';
+  const i = cam.lenses.findIndex((d) => d.deviceId === cur);
+  $('lens').setAttribute('aria-label', `Switch camera (now ${i >= 0 ? i + 1 : 1} of ${cam.lenses.length}${cam.lens ? ': ' + cam.lens : ''})`);
+}
+// The Full HD class at 30 fps: the tile spans up to ~1080 camera px, enough for the 2 px formats, and a frame
+// decodes in tens of ms. A larger mode (a phone's 2448x3264 8 MP portrait mode, asked for as 2560x1920 before)
+// costs 200-330 ms a frame to decode and blurs more, so fewer frames are read, not more. ?ptz=1 also asks for zoom
+// control explicitly (some browsers list zoom only then).
+const CAMERA_MAX_PX = 2.5e6;
+const FULL_HD = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+function constraints(deviceId) {
+  const v = { ...FULL_HD };
+  if (deviceId) v.deviceId = { exact: deviceId }; else v.facingMode = { ideal: 'environment' };
+  if (params.get('ptz') === '1') v.zoom = true;
+  return { audio: false, video: v };
+}
+const request = (deviceId) => navigator.mediaDevices.getUserMedia(constraints(deviceId));
+// A track that settled above 2.5 MP (a camera that ignores the size asked for) is brought down to ~1080 px on its
+// short side, its own shape kept; where the camera refuses that exact size, 1440x1080 (4:3, as the track is
+// turned) is asked for as an ideal; where it cannot do either, it is left as it is. Every later change to the
+// track (focus, zoom: each replaces the whole constraint set) carries the size in force, `cam.size`, so a camera
+// is never left free to go back to its large mode.
+async function fitSize(t) {
+  let st = {};
+  try { st = t.getSettings ? t.getSettings() : {}; } catch (e) {}
+  if (!(st.width * st.height > CAMERA_MAX_PX)) return;
+  const k = 1080 / Math.min(st.width, st.height), w = Math.round(st.width * k), h = Math.round(st.height * k);
+  const portrait = st.height > st.width;
+  for (const size of [{ width: { ideal: w, max: w }, height: { ideal: h, max: h }, frameRate: { ideal: 30 } },
+    { width: { ideal: portrait ? 1080 : 1440 }, height: { ideal: portrait ? 1440 : 1080 }, frameRate: { ideal: 30 } }]) {
+    try { await t.applyConstraints(size); cam.size = size; return; } catch (e) {}
+  }
+}
+let savedLens = '';
+try { savedLens = localStorage.getItem('lb-lens') || ''; } catch (e) {}
+// the lens chosen last time, else the browser's back camera
+async function openCamera(deviceId) {
+  let s;
+  try { s = await request(deviceId); }
+  catch (err) {
+    if (!(deviceId && err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError'))) throw err;
+    // the remembered lens is gone (another device, or ids reset): forget it and take the back camera
+    if (deviceId === savedLens) { savedLens = ''; try { localStorage.removeItem('lb-lens'); } catch (e) {} }
+    s = await request('');
+  }
+  cam.size = FULL_HD;
+  await fitSize(s.getVideoTracks()[0]);
+  await fastCapture(s.getVideoTracks()[0]);
+  return s;
+}
+// 60 fps where the camera offers it at the size in force: two captures per sender frame at 30 fps, so when one
+// lands on the screen's frame change (two frames blended: the reader's blend pre-check drops it before the cell
+// read, cheaply) the other is clean. The size stays as fitted (a camera that only does 60 fps smaller keeps 30:
+// `min` refuses a rate the camera cannot hold at this size).
+async function fastCapture(t) {
+  if (params.get('fps') === '30') return;
+  let st = {};
+  try { st = t.getSettings ? t.getSettings() : {}; } catch (e) {}
+  if (!(st.width > 0 && st.height > 0)) return;
+  const size = { width: { ideal: st.width, max: st.width }, height: { ideal: st.height, max: st.height }, frameRate: { ideal: 60, min: 50 } };
+  try { await t.applyConstraints(size); } catch (e) { return; }
+  let after = {};
+  try { after = t.getSettings(); } catch (e) {}
+  if (after.width === st.width && after.height === st.height && after.frameRate >= 50) { cam.size = size; cam.fast = true; }
+  else { try { await t.applyConstraints(cam.size); } catch (e) {} }
+}
+async function useStream(s) {
+  const video = $('video');
+  stream = s; video.srcObject = s;
+  await video.play().catch(() => {});
+  cam.fps = 0; cam.fpsFrames = 0; cam.fpsT0 = 0;
+  await setupTrack(s.getVideoTracks()[0]);
+  await listLenses();
+  if (running) { const gen = ++pumps; busy = false; pump(video, gen); countFrames(video, gen); }
+}
+// another lens: the stream changes, the receiver (and what it has received) stays
+async function switchLens() {
+  if (cam.lenses.length < 2 || !cam.track) return;
+  const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
+  const next = cam.lenses[(cam.lenses.findIndex((d) => d.deviceId === cur) + 1) % cam.lenses.length];
+  $('lens').disabled = true;
+  for (const t of stream.getTracks()) t.stop();
+  cam.track = null;
+  try {
+    await useStream(await openCamera(next.deviceId));
+    tracker.hold.reset();
+    // the device the track really opened (a fallback may have taken another)
+    const opened = cam.track && cam.track.getSettings ? cam.track.getSettings().deviceId : '';
+    try { if (opened) localStorage.setItem('lb-lens', opened); } catch (e) {}
+    say(`Camera: ${cam.lens || 'switched'}`);
+  } catch (err) { stopWith('The other camera did not start', `${reason(err)} Tap Start camera to use the back camera again.`); }
+  finally { $('lens').disabled = false; }
+}
+
+async function start() {
+  $('problem').hidden = true;
+  if (!window.isSecureContext) return problem('This page needs a secure address', 'Browsers allow the camera only on https:// or localhost. Open lensbolt.com, or serve this file from localhost.');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return problem('No camera access in this browser', 'Try Safari on iPhone or Chrome on Android.');
+  $('go').disabled = true;
+  let s;
+  try {
+    s = await openCamera(savedLens);
+  } catch (err) {
+    $('go').disabled = false;
+    if (err && err.name === 'NotAllowedError') return problem('Camera blocked', 'Allow camera access for this page in the browser settings, then choose the camera again.');
+    if (err && err.name === 'NotFoundError') return problem('No camera found', 'This device has no camera the browser can use. Open this page on a phone, or choose Share a window.');
+    if (err && err.name === 'NotReadableError') return problem('The camera is busy', 'Another app is using the camera. Close it, then choose the camera again.');
+    return problem('The camera did not start', `${reason(err)} Choose the camera to try again.`);
+  }
+  cam.mode = 'camera'; $('cam').dataset.src = 'camera'; $('d-camera-t').textContent = 'Camera';
+  await useStream(s);
+  const video = $('video');
+  worker = newWorker();
+  startReaders();
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (batchMessage(m)) return;
+    if (m.type === 'ready') { if (!workerReady(m)) return; running = true; busy = false; stalls = 0; startedAt = performance.now(); const gen = ++pumps; pump(video, gen); countFrames(video, gen); wakeLock(true); }
+    else if (m.type === 'status') { busy = false; stalls = 0; statusIn(m.status); paint(m.status); if (m.status.complete) running = false; }
+    else if (m.type === 'file') { showDone(m.name, m.bytes, null, true, m.sha256); }
+    else if (m.type === 'stored') { storedFile(m.name, m.store).then((f) => showDone(m.name, f, null, true, m.sha256)); }
+  };
+  worker.postMessage({ type: 'init', wasm: window.lensboltWasm, memory: params.has('memory') });
+  $('start').hidden = true; $('cam').hidden = false;
+}
+
+// ?selftest: the worker plays a simulated sender (no camera): checks the flow and this browser's decode speed
+function selftest() {
+  worker = newWorker();
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (batchMessage(m)) return;
+    // ?selftest=20 sends 20 MB (more than one 16 MB segment); the default is 0.6 MB
+    if (m.type === 'ready') { if (!workerReady(m)) return; startedAt = performance.now(); worker.postMessage({ type: 'selftest', bytes: Math.round((Number(params.get('selftest')) || 0.6) * 1e6), files: Number(params.get('files')) || 0 }); }
+    else if (m.type === 'status') render(m.status);
+    else if (m.type === 'file' || m.type === 'stored') {
+      (m.type === 'stored' ? storedFile(m.name, m.store) : Promise.resolve(new File([m.bytes], m.name))).then(async (f) => {
+        showDone(m.name, f, null, params.has('count'), m.sha256);
+        const ok = await sameBytes(f, m.selftest.expected);
+        $('done-meta').textContent += (ok ? ' · self-test: byte-identical' : ' · self-test: MISMATCH') + (m.type === 'stored' ? ' · kept in device storage (OPFS)' : ' · kept in memory');
+      });
+    }
+  };
+  worker.postMessage({ type: 'init', wasm: window.lensboltWasm, memory: params.has('memory') });
+  $('start').hidden = true; $('cam').hidden = false;
+  $('guide').textContent = 'Self-test: simulated sender';
+}
+if (params.has('selftest')) selftest();
+
+$('go').addEventListener('click', start);
+$('go-webcam').addEventListener('click', start);
+// the theme of the start screen (the camera screens stay dark): the same choice as the sender page's
+$('theme').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const d = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = d;
+  try { localStorage.setItem('lb-theme', d); } catch (e) {}
+});
+// screen capture exists on desktop browsers only: elsewhere the choice stays in view, disabled, saying why
+if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && !/Android|iPhone|iPad/i.test(navigator.userAgent)) $('screen').addEventListener('click', startScreen);
+else { $('screen').disabled = true; $('w-share-need').hidden = false; }
+// the three ways answer clicks from here on (the choices are in the page before this script runs; a test waits for this)
+document.documentElement.dataset.ready = 'start';
+$('lens').addEventListener('click', switchLens);
+$('info').addEventListener('click', () => { const on = $('details').hidden; $('details').hidden = !on; $('info').setAttribute('aria-pressed', String(on)); $('info').setAttribute('aria-label', on ? 'Hide details' : 'Show details'); });
+// tap the picture to focus there (the video fills the screen with object-fit: cover: map the tap through the crop)
+$('video').addEventListener('click', (e) => {
+  const v = $('video');
+  if (!cam.track || !v.videoWidth) return;
+  const r = v.getBoundingClientRect(), k = Math.max(r.width / v.videoWidth, r.height / v.videoHeight);
+  const w = v.videoWidth * k, h = v.videoHeight * k;
+  const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h;
+  if (x >= 0 && x <= 1 && y >= 0 && y <= 1) refocus({ x, y });
+});
+// ---- a batch: the summary, the file list (filters, rows drawn only where they show), each file and Save all ----
+// The worker hands each saved file over as it is saved (an OPFS file of its own, or bytes without OPFS); the list's
+// rows come a page at a time from the worker, for the rows in view (all of them for a filter, at most every 0.7 s).
+const B = () => window.LensBoltBatch;
+const ROW = 72, OVER = 4, PAGE = 500, REFRESH_MS = 700;
+const bv = { on: false, b: null, total: 0, list: [], have: new Set(), filter: 'all', idx: [], saved: new Map(), done: false, open: false,
+  req: 0, waits: new Map(), refreshing: false, again: false, againForce: false, next: null, refreshAt: 0, fits: new Map(), fitW: 0,
+  rows: new Map(), spare: [], gen: undefined, announce: null };
+function workerPage(offset, count) {
+  const id = ++bv.req;
+  return new Promise((resolve) => { bv.waits.set(id, resolve); worker.postMessage({ type: 'page', id, offset, count }); });
+}
+// what the batch view takes of the worker's messages (true when it took the message)
+function batchMessage(m) {
+  if (m.type === 'page') { const w = bv.waits.get(m.id); if (w) { bv.waits.delete(m.id); w(JSON.parse(m.json)); } return true; }
+  // a run before this one (its last copies finishing after Receive another, or a stopped run): not this batch's
+  if ((m.type === 'saved' || m.type === 'batch-done') && m.gen !== undefined && bv.gen !== undefined && m.gen !== bv.gen) return true;
+  if (m.type === 'saved') {
+    bv.saved.set(m.name, m.error ? { error: m.error } : m.bytes ? { blob: new File([m.bytes], m.name, { type: 'application/octet-stream' }) } : { store: m.store });
+    draw(); return true;
+  }
+  if (m.type === 'batch-done') { showBatchDone(); return true; }
+  return false;
+}
+// the rows the list needs now: those in view for All while receiving; the whole list for a filter, and once done
+// A refresh asked for while one is under way runs right after it, and its caller waits for that run (Done counts the
+// whole list, never a list half fetched).
+async function refresh(force = false) {
+  if (!bv.on || !worker || !bv.total) return;
+  if (bv.refreshing) {
+    bv.again = true; bv.againForce = bv.againForce || force;
+    if (!bv.next) { let done; bv.next = new Promise((r) => { done = r; }); bv.next.done = done; }
+    return bv.next;
+  }
+  const now = performance.now();
+  if (!force && now - bv.refreshAt < REFRESH_MS) { if (!bv.timer) bv.timer = setTimeout(() => { bv.timer = 0; refresh(); }, REFRESH_MS); return; }
+  bv.refreshing = true; bv.refreshAt = now;
+  try {
+    const all = bv.done || bv.filter !== 'all';
+    let from = 0, to = bv.total;
+    if (!all) { const [a, b] = B().visibleRows($('flist').scrollTop, $('flist').clientHeight || 300, ROW, bv.total, OVER); from = Math.floor(a / PAGE) * PAGE; to = Math.min(bv.total, Math.ceil(b / PAGE) * PAGE); }
+    for (let at = from; at < to; at += PAGE) {
+      const p = await workerPage(at, Math.min(PAGE, to - at));
+      p.files.forEach((f, k) => { bv.list[p.offset + k] = f; bv.have.add(p.offset + k); });
+    }
+    if (bv.filter !== 'all') bv.idx = bv.list.reduce((o, f, i) => (f && B().inFilter(f.state, bv.filter) ? (o.push(i), o) : o), []);
+  } finally { bv.refreshing = false; }
+  draw();
+  if (bv.again) {
+    const next = bv.next, f = bv.againForce;
+    bv.again = false; bv.againForce = false; bv.next = null;
+    try { await refresh(f); } finally { if (next) next.done(); }
+  }
+}
+// the whole list (every page), for Save, the space check and Done
+async function wholeList() {
+  if (!worker) return bv.list;
+  const head = await workerPage(0, 1);
+  if (head.total !== bv.total) { bv.total = head.total; bv.list.length = head.total; }
+  for (let at = 0; at < bv.total; at += PAGE) {
+    const p = await workerPage(at, Math.min(PAGE, bv.total - at));
+    p.files.forEach((f, k) => { bv.list[p.offset + k] = f; bv.have.add(p.offset + k); });
+  }
+  if (bv.filter !== 'all') bv.idx = bv.list.reduce((o, f, i) => (f && B().inFilter(f.state, bv.filter) ? (o.push(i), o) : o), []);
+  return bv.list;
+}
+// a name in the space of a row's two lines: whole, else shortened in the middle, the extension kept
+const measure = document.createElement('canvas').getContext('2d');
+function fitName(name, el) {
+  const w = el.clientWidth;
+  if (!w) return name;
+  if (w !== bv.fitW) { bv.fitW = w; bv.fits.clear(); measure.font = getComputedStyle(el).font; }
+  let t = bv.fits.get(name);
+  if (t === undefined) { t = B().middleFit(name, (x) => measure.measureText(x).width <= w * 2 - 16); bv.fits.set(name, t); }
+  return t;
+}
+function rowEl() {
+  const r = document.createElement('div');
+  r.className = 'frow'; r.setAttribute('role', 'listitem');
+  r.innerHTML = `<div class="fmain"><div class="fname"></div><div class="fmeta num"><span class="fsize"></span><span class="sep"> · </span><span class="badge"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span class="btext"></span></span></div></div><button class="fhashb" type="button" aria-controls="fhash"><svg class="i"><use href="#i-hash"/></svg><span aria-hidden="true">SHA</span></button><button class="fsave" type="button"><svg class="i"><use href="#i-download"/></svg><span aria-hidden="true">Save</span></button><button class="fshare" type="button"><svg class="i"><use href="#i-share"/></svg><span aria-hidden="true">Share</span></button>`;
+  r.querySelector('.fhashb').addEventListener('click', () => toggleHash(r.dataset.name));
+  r.querySelector('.fsave').addEventListener('click', () => saveOne(r.dataset.name));
+  r.querySelector('.fshare').addEventListener('click', () => shareOne(r.dataset.name));
+  return r;
+}
+// Whether this browser can hand a file of this name to another app: Chrome allows only some file types
+// (images, audio, video, text, PDF, ...; not .zip or arbitrary binaries), and judges by name and type, so an
+// empty file with the real name answers for the real one. Save always works.
+const shareProbe = new Map();
+function canShareFile(name) {
+  if (!navigator.canShare) return false;
+  if (!shareProbe.has(name)) { let ok = false; try { ok = navigator.canShare({ files: [new File([''], name)] }); } catch (e) { ok = false; } shareProbe.set(name, ok); }
+  return shareProbe.get(name);
+}
+let drawing = 0;
+function draw() { if (!drawing) drawing = requestAnimationFrame(() => { drawing = 0; drawNow(); }); }
+// Rows are tied to files (bv.rows: file index -> row): a row keeps its file while the file is in view, and the row
+// holding the keyboard focus keeps it out of view too, so recycling never moves the focus to another file's button.
+function drawNow() {
+  if (!bv.on || $('files').hidden) return;
+  const list = $('flist'), count = bv.filter === 'all' ? bv.total : bv.idx.length;
+  $('fspace').style.height = count * ROW + 'px';
+  const [a, b] = B().visibleRows(list.scrollTop, list.clientHeight, ROW, count, OVER);
+  const keyAt = (n) => (bv.filter === 'all' ? n : bv.idx[n]);
+  const needed = [];
+  for (let n = a; n < b; n++) needed.push(keyAt(n));
+  const fr = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.frow') : null;
+  const focused = fr && fr.dataset.key ? Number(fr.dataset.key) : null;
+  const plan = B().rowPlan(bv.rows, needed, focused);
+  const free = plan.free.concat(bv.spare);
+  bv.rows = plan.keep;
+  for (const k of plan.need) { let r = free.pop(); if (!r) { r = rowEl(); $('fspace').append(r); } bv.rows.set(k, r); }
+  for (const r of free) { r.hidden = true; r.dataset.key = ''; }
+  bv.spare = free;
+  let missing = false;
+  for (let n = a; n < b; n++) {
+    const i = keyAt(n), r = bv.rows.get(i), f = bv.list[i];
+    r.hidden = false; r.dataset.key = String(i);
+    r.style.top = n * ROW + 'px';
+    r.setAttribute('aria-posinset', String(n + 1)); r.setAttribute('aria-setsize', String(count));
+    if (!f) { missing = true; r.querySelector('.fname').textContent = '…'; r.querySelector('.fmeta').hidden = true; r.dataset.name = ''; r.querySelector('.fsave').hidden = r.querySelector('.fshare').hidden = r.querySelector('.fhashb').hidden = true; r.removeAttribute('aria-label'); continue; }
+    const kept = bv.saved.get(f.name), ok = f.state === 'received' && kept && !kept.error;
+    const nameEl = r.querySelector('.fname'), t = fitName(f.name, nameEl);
+    if (nameEl.textContent !== t) nameEl.textContent = t;
+    nameEl.title = f.name;
+    // the size, then the state as a badge: icon and words (Missing once the batch is done)
+    const m = r.querySelector('.fmeta'), bd = B().badge(f, bv.done, f.state === 'received' ? kept : null), size = B().human(f.size);
+    m.hidden = false;
+    if (m.firstChild.textContent !== size) m.firstChild.textContent = size;
+    const bx = m.querySelector('.badge');
+    if (bx.className !== `badge ${bd.tone}`) bx.className = `badge ${bd.tone}`;
+    const use = bx.querySelector('use'), icon = { check: '#i-check', alert: '#i-alert', down: '#i-download', clock: '#i-clock' }[bd.icon];
+    if (use.getAttribute('href') !== icon) use.setAttribute('href', icon);
+    if (bx.lastChild.textContent !== bd.text) bx.lastChild.textContent = bd.text;
+    r.setAttribute('aria-label', B().rowLabel(f));
+    r.dataset.name = f.name;
+    const sv = r.querySelector('.fsave'), sh = r.querySelector('.fshare');
+    sv.hidden = !ok; sh.hidden = !ok || !canShareFile(f.name);
+    sv.setAttribute('aria-label', `Save ${f.name}`); sh.setAttribute('aria-label', `Share ${f.name}`);
+    // a received file's SHA-256, opened under the list (one at a time)
+    const hb = r.querySelector('.fhashb');
+    hb.hidden = !f.sha256; hb.setAttribute('aria-label', `SHA-256 of ${f.name}`); hb.setAttribute('aria-expanded', String(bv.hash === f.name));
+    if (bv.hash === f.name) hashPanel(f);
+  }
+  $('fnone').hidden = count > 0 || !bv.b || !bv.b.total;
+  // before the list: what comes, with its picture
+  $('fempty').hidden = !!(bv.b && (bv.b.total || bv.b.error));
+  if (!$('fnone').hidden) $('fnone').textContent = { received: 'No file received yet.', missing: 'No file missing.', failed: 'No file failed.', all: '' }[bv.filter];
+  if (missing) refresh();
+}
+// the SHA-256 of one received file of the batch, under the list: a row's # button opens it, again closes it
+function hashPanel(f) {
+  const on = !!(f && f.sha256 && showSha(f.sha256, 'fhash-hex', 'fhash-say'));
+  $('fhash').hidden = !on;
+  if (on) { $('fhash-name').textContent = `SHA-256 of ${f.name}`; $('fhash-copy').setAttribute('aria-label', `Copy the SHA-256 of ${f.name}`); bv.hashHex = f.sha256; }
+}
+function toggleHash(name) {
+  bv.hash = bv.hash === name || !name ? '' : name;
+  const f = bv.list.find((x) => x && x.name === bv.hash);
+  hashPanel(bv.hash ? f : null);
+  if (!bv.hash) bv.hashHex = '';
+  draw();
+}
+$('fhash-copy').addEventListener('click', () => copySha(bv.hashHex, $('fhash-hex'), $('fhash-copy')));
+$('flist').addEventListener('scroll', () => { draw(); if (bv.filter === 'all' && !bv.done) refresh(); }, { passive: true });
+window.addEventListener('resize', () => draw());
+document.querySelectorAll('#filters button').forEach((btn) => btn.addEventListener('click', () => {
+  bv.filter = btn.dataset.f;
+  document.querySelectorAll('#filters button').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
+  bv.idx = bv.list.reduce((o, f, i) => (f && B().inFilter(f.state, bv.filter) ? (o.push(i), o) : o), []);
+  // a hash open for a file this filter hides closes with it
+  if (bv.hash) { const at = bv.list.findIndex((x) => x && x.name === bv.hash); if (at < 0 || !B().inFilter(bv.list[at].state, bv.filter)) toggleHash(''); }
+  $('flist').scrollTop = 0; draw(); refresh(true);
+}));
+function openFiles(on) {
+  bv.open = on; $('files').hidden = !on;
+  $('batch-toggle').setAttribute('aria-expanded', String(on));
+  $('batch-toggle-text').textContent = on ? 'Hide files' : 'Show files';
+  if (on) { draw(); refresh(true); }
+}
+$('batch-toggle').addEventListener('click', () => openFiles(!bv.open));
+// a status of a batch: the summary while receiving, the filters' counts, the list when it shows
+function renderBatch(s) {
+  const b = s.batch;
+  if (!b) return;
+  if (!bv.on) { bv.on = true; $('batch').hidden = false; }
+  bv.b = b;
+  if (b.total !== bv.total) { bv.total = b.total; bv.list.length = b.total; }
+  const sum = B().summaryLive(b, s.received_bytes || 0, s.stream_size || 0);
+  if ($('batch-sum').textContent !== sum) $('batch-sum').textContent = sum;
+  // said aloud when the file counts change (at most every 5 s; a failure at once), not with every byte
+  if (!bv.announce) bv.announce = new (B().Announcer)(5000);
+  const said = bv.announce.update(b, sum, performance.now());
+  if (said) $('batch-say').textContent = said;
+  $('batch-sum').classList.toggle('bad', !!b.error);
+  const n = B().filterCounts(b);
+  for (const k of B().FILTERS) { const el = $(`n-${k}`), t = B().count(n[k]); if (el.textContent !== t) el.textContent = t; }
+  $('save-got').hidden = bv.done || !b.received;
+  if (!$('files').hidden) refresh();
+}
+// a saved file of the batch: a disk-backed File from the worker's OPFS copy (never copied into memory), or its bytes
+let batchDir = null;
+async function keptFile(name) {
+  const k = bv.saved.get(name);
+  if (!k || k.error) throw new Error(k ? k.error : 'not saved yet');
+  if (k.blob) return k.blob;
+  if (!batchDir) batchDir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('lensbolt')).getDirectoryHandle('batch');
+  return new File([await (await batchDir.getFileHandle(k.store)).getFile()], name, { type: 'application/octet-stream' });
+}
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+// Save all's line in the toast: `pct` (0..1) while it works (a bar), `ok` once done (a check); the toast goes a while
+// after a result and stays while saving
+let toastTimer = 0;
+const saveMsg = (t, bad = false, pct = null, ok = false) => {
+  $('save-msg').textContent = t; $('save-msg').classList.toggle('bad', bad);
+  const toast = $('toast');
+  clearTimeout(toastTimer);
+  toast.hidden = !t;
+  if (!t) return;
+  toast.className = 'toast' + (bad ? ' bad' : ok ? ' ok' : '');
+  $('toast-icon').setAttribute('href', bad ? '#i-alert' : ok ? '#i-check' : '#i-download');
+  $('toast-bar').hidden = pct === null;
+  if (pct !== null) $('toast-fill').style.width = `${Math.round(Math.min(1, Math.max(0, pct)) * 100)}%`;
+  if (pct === null) toastTimer = setTimeout(() => { toast.hidden = true; }, bad ? 15000 : 6000);
+};
+async function saveOne(name) { if (!name) return; try { download(await keptFile(name), name); } catch (e) { saveMsg(`${name} could not be saved: ${reason(e)}`, true); } }
+async function shareOne(name) { if (!name) return; try { const f = await keptFile(name); await navigator.share({ files: [f], title: name }); } catch (e) { if (!e || e.name !== 'AbortError') saveMsg(`${name} could not be shared: ${reason(e)}`, true); } }
+// the files to save: every file the worker said it kept (not only the rows fetched so far), in the list's order
+async function keptNames() {
+  const list = await wholeList(), at = new Map();
+  list.forEach((f, i) => { if (f) at.set(f.name, i); });
+  return B().keptInOrder(bv.saved, (n) => at.get(n));
+}
+// Save all: into a folder the user picks where the browser can (each file under its name, " (2)" for a name taken
+// there), else one stored zip (the files read once for their checksums, then streamed into the download)
+let saving = false;
+async function saveAll() {
+  if (saving) return;
+  saving = true;
+  try {
+    const names = await keptNames();
+    if (!names.length) { saveMsg('No file is ready to save yet.'); return; }
+    if (window.showDirectoryPicker) {
+      let dir;
+      try { dir = await window.showDirectoryPicker({ id: 'lensbolt', mode: 'readwrite' }); }
+      catch (e) { if (e && e.name === 'AbortError') { saveMsg(''); return; } dir = null; }
+      if (dir) {
+        const taken = new Set();
+        for await (const k of dir.keys()) taken.add(k.toLowerCase());
+        const failed = [];
+        for (let i = 0; i < names.length; i++) {
+          saveMsg(`Saving ${i + 1} of ${names.length} into ${dir.name}…`, false, i / names.length);
+          let to = null;
+          try {
+            to = B().freeName(names[i], (n) => taken.has(n.toLowerCase()));
+            taken.add(to.toLowerCase());
+            const w = await (await dir.getFileHandle(to, { create: true })).createWritable();
+            await (await keptFile(names[i])).stream().pipeTo(w);
+          } catch (e) {
+            failed.push(`${names[i]} (${reason(e).replace(/\.$/, '')})`);
+            // the name was free before: what this save left under it goes
+            if (to) { try { await dir.removeEntry(to); } catch (x) {} }
+          }
+        }
+        saveMsg(failed.length ? `Saved ${names.length - failed.length} of ${names.length} into ${dir.name}. Not saved: ${failed.join(', ')}.` : `Saved ${names.length === 1 ? 'the file' : `all ${names.length} files`} into ${dir.name}.`, failed.length > 0, null, !failed.length);
+        if (!failed.length) bv.savedN = Math.max(bv.savedN || 0, names.length);
+        return;
+      }
+    }
+    // a zip: each file's checksum first (read once, a piece at a time), then the zip as parts of one Blob
+    const entries = [];
+    let done = 0;
+    const total = names.length;
+    for (const name of names) {
+      const f = await keptFile(name);
+      let crc = 0;
+      const r = f.stream().getReader();
+      for (;;) { const { value, done: end } = await r.read(); if (end) break; crc = B().crc32(value, crc); }
+      entries.push({ name, size: f.size, crc, data: f });
+      saveMsg(`Preparing the zip: ${++done} of ${total} files…`, false, done / total);
+    }
+    const zip = new Blob(B().zipParts(entries), { type: 'application/zip' });
+    download(zip, `${(bv.b && bv.b.name) || 'LensBolt files'}.zip`);
+    saveMsg(`Saving ${total === 1 ? 'the file' : `${total} files`} as ${(bv.b && bv.b.name) || 'LensBolt files'}.zip (${B().human(zip.size)}).`, false, null, true);
+    bv.savedN = Math.max(bv.savedN || 0, total);
+  } catch (e) { saveMsg(`The files could not be saved: ${reason(e)}`, true); }
+  finally { saving = false; }
+}
+$('save-got').addEventListener('click', saveAll);
+// the batch received: its Done screen, the list open, the size the files add up to
+async function showBatchDone() {
+  bv.done = true; bv.on = true;
+  // the list's length as the receiver has it now (the batch-done message comes before the last frame's status)
+  await wholeList();
+  // the counts from the list as it ends (the last status may be a frame behind)
+  const got = bv.list.filter((f) => f && f.state === 'received').length, bad = bv.list.filter((f) => f && f.state === 'failed').length;
+  const b = { name: bv.b ? bv.b.name : '', total: bv.total, received: got, failed: bad, error: bv.b ? bv.b.error : null }, s = lastStatus;
+  bv.b = b;
+  const bytes = bv.list.reduce((n, f) => n + (f && f.state === 'received' ? f.size : 0), 0);
+  $('live').hidden = true; $('done').hidden = false; $('idle').hidden = true; $('banner').hidden = true; $('version').hidden = true;
+  $('done-name').textContent = b.name || (s && s.filename) || 'Files';
+  const secs = s && s.seconds ? s.seconds : (performance.now() - startedAt) / 1000;
+  const mbit = (s && s.stream_size ? s.stream_size : bytes) * 8 / secs / 1e6;
+  $('done-meta').textContent = `${B().human(bytes)} in ${secs.toFixed(1)} s · ${mbit.toFixed(2)} Mbit/s`;
+  // a file received but not kept on this device (its copy hit a full storage) is said, never "all verified"
+  const lost = [...bv.saved.values()].filter((k) => k && k.error), why = lost.length ? lost[0].error : '';
+  $('verified-text').textContent = B().summaryDone(b, bytes, lost.length, why);
+  $('sha').hidden = true;
+  // all verified and kept: green; anything less: amber with the alert icon on the title and the summary
+  const tone = B().doneState(b, lost.length);
+  const partial = tone.tone !== 'ok';
+  $('done').querySelector('.verified').classList.toggle('bad', partial);
+  $('done-title').classList.toggle('warn', partial);
+  $('done-icon').setAttribute('href', partial ? '#i-alert' : '#i-check');
+  $('verified-icon').setAttribute('href', partial ? '#i-alert' : '#i-shield');
+  // the filters counted from the whole list (the last status may be a frame behind it)
+  const n = B().filterCountsOf(bv.list);
+  for (const k of B().FILTERS) $(`n-${k}`).textContent = B().count(n[k]);
+  // nothing missing once done: that chip says nothing
+  document.querySelector('#filters [data-f="missing"]').hidden = n.missing === 0;
+  $('save-text').textContent = b.received === 1 ? 'Save the file' : 'Save all';
+  $('save').disabled = !b.received;
+  $('share').hidden = true;
+  $('done').insertBefore($('files'), $('ask'));
+  $('files').hidden = false; $('save-got').hidden = true;
+  draw();
+  $('cam').dataset.lock = partial ? 'warn' : 'good'; $('guide').textContent = tone.guide;
+  say(`Received ${B().summaryDone(b, bytes, lost.length, why)}`);
+  running = false; wakeLock(false);
+  showAsk(countThis && !b.error && b.received > 0 && donate.afterTransfer());
+  // nothing to save: the focus goes to what can be done next
+  ($('save').disabled ? $('again') : $('save')).focus();
+}
+let countThis = true;
+function resetBatch() {
+  for (const w of bv.waits.values()) w({ offset: 0, total: 0, files: [] });
+  if (bv.next) bv.next.done();
+  Object.assign(bv, { on: false, b: null, total: 0, list: [], have: new Set(), filter: 'all', idx: [], saved: new Map(), done: false, open: false, waits: new Map(), refreshing: false, again: false, againForce: false, next: null, refreshAt: 0, hash: '', hashHex: '', announce: null, savedN: 0 });
+  $('batch-say').textContent = '';
+  $('fhash').hidden = true; $('sha').hidden = true; doneSha = '';
+  batchDir = null;
+  for (const r of [...bv.rows.values(), ...bv.spare]) r.remove();
+  bv.rows = new Map(); bv.spare = [];
+  document.querySelectorAll('#filters button').forEach((x) => { x.setAttribute('aria-pressed', String(x.dataset.f === 'all')); x.hidden = false; });
+  $('batch').hidden = true; $('files').hidden = true; $('batch-toggle').setAttribute('aria-expanded', 'false'); $('batch-toggle-text').textContent = 'Show files';
+  $('live').insertBefore($('files'), $('finish'));
+  $('save-text').textContent = 'Save file'; $('save').disabled = false; $('verified-text').textContent = 'SHA-256 verified';
+  $('done').querySelector('.verified').classList.remove('bad');
+  $('done-title').classList.remove('warn'); $('done-icon').setAttribute('href', '#i-check'); $('verified-icon').setAttribute('href', '#i-shield');
+  saveMsg('');
+}
+
+// a self-test counts towards the support card only with ?count (for tests)
+countThis = !params.has('selftest') || params.has('count');
+let fileSaved = false;
+$('save').addEventListener('click', () => {
+  if (bv.on) { saveAll(); return; }
+  if (!file) return;
+  fileSaved = true;
+  const url = URL.createObjectURL(file);
+  const a = Object.assign(document.createElement('a'), { href: url, download: file.name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+});
+$('finish-lead').textContent = FINISH_TEXT;
+// copy the words (a sender in a VM or remote desktop on this computer); where the clipboard is refused they are
+// selected instead, for the browser's own Copy
+let copyTimer = 0;
+$('copy').addEventListener('click', async () => {
+  const el = $('finish-words');
+  let ok = false;
+  try { await navigator.clipboard.writeText(el.textContent); ok = true; } catch (e) {}
+  if (!ok) { const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  $('copy-text').textContent = ok ? 'Copied' : 'Selected'; $('copy').classList.add('said');
+  $('copy-say').textContent = ok ? 'Finish words copied' : 'Finish words selected: copy them with the browser';
+  clearTimeout(copyTimer); copyTimer = setTimeout(() => { $('copy-text').textContent = 'Copy'; $('copy').classList.remove('said'); $('copy-say').textContent = ''; }, 1600);
+});
+$('share').addEventListener('click', () => { if (file) navigator.share({ files: [file], title: file.name }).catch(() => {}); });
+// a question before files not saved are dropped: Discard, or the safe choice (last, focused); resolves true for Discard
+function askFirst(a) {
+  const d = $('ask-dlg');
+  $('ask-dlg-t').textContent = a.title; $('ask-dlg-p').textContent = a.text;
+  $('ask-dlg-no').textContent = a.discard; $('ask-dlg-yes').textContent = a.keep;
+  return new Promise((done) => {
+    const end = (v) => { d.close(); $('ask-dlg-no').onclick = $('ask-dlg-yes').onclick = d.oncancel = null; done(v); };
+    $('ask-dlg-no').onclick = () => end(true); $('ask-dlg-yes').onclick = () => end(false); d.oncancel = (e) => { e.preventDefault(); end(false); };
+    d.showModal(); $('ask-dlg-yes').focus();
+  });
+}
+// what Receive another (or Close) would drop unsaved: null when nothing
+function unsaved() {
+  if (bv.on && bv.done) { const got = bv.list.filter((f) => f && f.state === 'received' && !(bv.saved.get(f.name) || {}).error).length; return got > (bv.savedN || 0) ? B().discardAsk({ batch: true, received: got }) : null; }
+  if (file && !$('done').hidden && !fileSaved) return B().discardAsk({ batch: false, name: file.name });
+  return null;
+}
+$('again').addEventListener('click', async () => {
+  const a = unsaved();
+  if (a && !(await askFirst(a))) { $('save').focus(); return; }
+  receiveAnother();
+});
+function receiveAnother() {
+  file = null; fileSaved = false; $('done').hidden = true; $('live').hidden = false; showAsk(false); resetBatch();
+  $('fname').textContent = 'Waiting for the file name'; $('fname').classList.add('wait');
+  $('finish').hidden = true; $('finish-words').textContent = ''; $('finish-parts').textContent = ''; $('finish-parts').hidden = true;
+  $('fill').style.width = '0%'; $('got').textContent = '0'; $('got-unit').textContent = 'Received'; $('rate').textContent = '–'; $('x').textContent = '–';
+  tracker.r = new ReadTracker(); tracker.focus = new FocusWatch(); tracker.banner = new FpsBanner(); tracker.version.reset(); tracker.hold.reset(); startedAt = performance.now(); lastStatus = null;
+  for (const l of zoomLimits.values()) l.reset();
+  // the worker answers with 'ready', which starts the frames again; the readers start again (no geometry, no frames
+  // of the last transfer in flight)
+  worker.postMessage({ type: 'reset' });
+  if (readers.length) startReaders();
+}
+// Close: back to the start screen, camera or sharing off (asked first when received files are not saved)
+$('close').addEventListener('click', async () => {
+  // mid-transfer: what came so far would go (the same question as the app's Start over)
+  const a = unsaved() || (running && $('done').hidden && lastStatus && lastStatus.received_bytes > 0
+    ? { title: 'Stop receiving?', text: 'What has been received so far is discarded.', discard: 'Stop', keep: 'Keep receiving' } : null);
+  if (a && !(await askFirst(a))) return;
+  running = false;
+  if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+  if (worker) { worker.terminate(); worker = null; }
+  stopReaders();
+  cam.track = null; cam.mode = ''; wakeLock(false);
+  file = null; fileSaved = false; showAsk(false); resetBatch();
+  $('done').hidden = true; $('live').hidden = false; $('idle').hidden = true; $('banner').hidden = true; $('version').hidden = true;
+  $('fname').textContent = 'Waiting for the file name'; $('fname').classList.add('wait');
+  $('finish').hidden = true; $('fill').style.width = '0%'; $('got').textContent = '0'; $('got-unit').textContent = 'Received'; $('rate').textContent = '–'; $('x').textContent = '–';
+  tracker.r = new ReadTracker(); tracker.hold.reset(); lastStatus = null; $('cam').dataset.lock = 'search'; $('guide').textContent = 'Looking for the LensBolt screen';
+  $('video').srcObject = null; $('video').style.objectFit = '';
+  $('cam').hidden = true; $('start').hidden = false; $('go').disabled = false; $('problem').hidden = true;
+  $('go').focus();
+});
+</script>
+</body>
+</html>

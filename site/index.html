@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F7FAFD" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#060F25" media="(prefers-color-scheme: dark)">
+<title>LensBolt: files from any screen to a phone camera</title>
+<meta name="description" content="Send a file from any screen to a phone camera. No cable, no network, no account, and every byte checked.">
+<link rel="canonical" href="https://lensbolt.com/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://lensbolt.com/">
+<meta property="og:title" content="LensBolt: files from any screen to a phone camera">
+<meta property="og:description" content="No cable, no network, no account. The phone reads the screen and checks every byte.">
+<meta property="og:image" content="https://lensbolt.com{{asset:assets/social.jpg}}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A laptop shows a square of fine moving dots and a phone in front of it reads them.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+{{icons}}
+<a class="skip" href="#main">Skip to the content</a>
+<header class="band">
+  <div class="top wrap">
+    <a class="brand" href="/"><img src="../assets/logo-mark-128.png" alt="" width="30" height="30"><span>Lens<b>Bolt</b></span></a>
+    <nav aria-label="Site">
+      <a href="/send">Send</a>
+      <a href="/receive">Receive</a>
+      <a class="opt" href="#android">Android app</a>
+      <a class="opt" href="https://github.com/akhil-dara/lensbolt-web" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <section class="band hero" aria-labelledby="hero-title">
+    <figure class="hero-art">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="assets/hero-800.webp 800w, assets/hero.webp 1344w" sizes="(min-width: 900px) 1280px, 100vw">
+        <img src="assets/hero-light.webp" srcset="assets/hero-light-800.webp 800w, assets/hero-light.webp 1344w" sizes="(min-width: 900px) 1280px, 100vw" width="1344" height="752" fetchpriority="high"
+          alt="A laptop shows a square of fine moving dots; a phone held beside it points its camera at the square.">
+      </picture>
+    </figure>
+    <div class="hero-copy">
+      <h1 id="hero-title">Files from any screen to a phone&nbsp;camera.</h1>
+      <p class="lede">The file plays on the screen as a moving pattern, and the phone's camera reads it, checking every byte as it lands. <strong>No cable, no network, no account.</strong></p>
+      <div class="actions">
+        <a class="btn primary" href="/send">Send a file</a>
+        <a class="btn quiet" href="/receive">Receive</a>
+      </div>
+      <p class="fine"><svg class="i" aria-hidden="true"><use href="#i-wifi-off"/></svg><span>Both run in your browser. Your file is never uploaded anywhere.</span></p>
+    </div>
+  </section>
+
+<section class="block wrap" aria-labelledby="ways-title">
+  <h2 id="ways-title">Three ways to receive</h2>
+  <p class="intro">Open the sender on the computer that has the file. Then pick whatever can see its screen.</p>
+  <ul class="ways">
+    <li>
+      <figure><img src="assets/way-phone.webp" width="720" height="576" loading="lazy" alt="A phone's camera aimed at the pattern on a laptop screen."></figure>
+      <h3>A phone camera</h3>
+      <p>On Android, open the LensBolt app and hold the phone up to the screen. Or open <span class="addr">lensbolt.com/receive</span> in the phone's browser and choose <b data-way>Phone camera</b>.</p>
+      <p class="iphone">On an iPhone, open lensbolt.com/receive in Safari.</p>
+    </li>
+    <li>
+      <figure><img src="assets/way-webcam.webp" width="720" height="353" loading="lazy" alt="One laptop shows the pattern; a second laptop reads it through its webcam."></figure>
+      <h3>A webcam</h3>
+      <p>Another computer can read the screen through its webcam. Open <span class="addr">lensbolt.com/receive</span> there and choose <b data-way>Webcam</b>.</p>
+    </li>
+    <li>
+      <figure><img src="assets/way-share.webp" width="720" height="474" loading="lazy" alt="On one monitor, the pattern in one window flows into a receiving window beside it."></figure>
+      <h3>A window on the same screen</h3>
+      <p>Sending from a virtual machine or a remote desktop? Open the receiver on the computer itself and choose <b data-way>Share a window</b>, then pick the window that shows the sender.</p>
+    </li>
+  </ul>
+</section>
+
+<section class="block wrap" aria-labelledby="proof-title">
+  <div class="proof">
+    <h2 id="proof-title">Every byte checked, nothing sent anywhere.</h2>
+    <dl>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>The file arrives whole or not at all</dt>
+        <dd>Each file carries its SHA-256. The receiver hands it over only once the hash it computes matches the sender's, and both screens show the hash, so you can compare them yourself.</dd>
+      </div>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-wifi-off"/></svg>Light is the only link</dt>
+        <dd>Nothing travels over a network: the screen shows, the camera reads. It works between machines that have never been connected to anything.</dd>
+      </div>
+      <div>
+        <dt><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Works offline after the first visit</dt>
+        <dd>Open /send or /receive once and the browser keeps them, so they load with no connection at all. On an iPhone, Safari may clear them after a week without a visit; adding the page to the Home Screen keeps it.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="block wrap" id="android" aria-labelledby="android-title">
+  <div class="app">
+    <img src="assets/icon-192.png" alt="" width="88" height="88">
+    <div>
+      <h2 id="android-title">Get the Android app</h2>
+      <p>On Android, the LensBolt app is the quicker way to receive. It doesn't even ask for internet access: files reach it only through the camera.</p>
+    </div>
+{{android}}
+  </div>
+</section>
+
+<section class="block wrap" id="offline" aria-labelledby="offline-title">
+  <h2 id="offline-title">Works from a USB stick</h2>
+  <p class="intro">Both pages also come as single HTML files with everything inside. Copy them to a USB stick or an offline computer and open them in a browser: no install, no server, no internet.</p>
+  <ul class="files">
+    <li><a href="/downloads/lensbolt" download="lensbolt.html"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg><span class="what"><b>The sender</b><span>lensbolt.html</span></span><span class="size tnum">{{size:lensbolt.html}}</span></a></li>
+    <li><a href="/downloads/lensbolt-receive" download="lensbolt-receive.html"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg><span class="what"><b>The receiver</b><span>lensbolt-receive.html</span></span><span class="size tnum">{{size:lensbolt-receive.html}}</span></a></li>
+  </ul>
+  <p class="more"><a href="/downloads/">All downloads</a></p>
+</section>
+</main>
+
+{{footer}}
+</body>
+</html>
