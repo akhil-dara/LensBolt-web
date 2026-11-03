@@ -5,7 +5,7 @@ use lensbolt_core::calib::{CodeError, Config, CALIB_FIRST};
 use lensbolt_core::file::BatchSource;
 use lensbolt_core::finish::{parts_text, FinishError};
 use lensbolt_core::words::{word_index, WordError, WORDS};
-use lensbolt_core::flat::{render_to, Alphabet, CellFormat, FlatGrid, FlatSender, FlatSenderConfig, MANIFEST_EVERY_FRAMES, MANIFEST_FORMAT};
+use lensbolt_core::flat::{render_rgba, Alphabet, CellFormat, FlatGrid, FlatSender, FlatSenderConfig, MANIFEST_EVERY_FRAMES, MANIFEST_FORMAT};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use std::collections::BTreeMap;
@@ -123,12 +123,7 @@ impl WebSender {
     /// True once the named parts have all had their repair rounds and the sender went back to every part by
     /// itself (the page then asks for the phone's new words); false while they are sent, and after new words.
     pub fn focus_done(&self) -> bool { self.sender.focus_done() }
-    fn rgba(&self, frame: &lensbolt_core::flat::FlatFrame) -> Vec<u8> {
-        let img = render_to(frame, self.width, self.height);
-        let mut out = Vec::with_capacity(img.data.len() / 3 * 4);
-        for px in img.data.chunks_exact(3) { out.extend_from_slice(&[px[0], px[1], px[2], 255]); }
-        out
-    }
+    fn rgba(&self, frame: &lensbolt_core::flat::FlatFrame) -> Vec<u8> { render_rgba(frame, self.width, self.height) }
 }
 
 /// The sender's configuration for a tile of `width` x `height` and calibration words `code` (empty: the blind
