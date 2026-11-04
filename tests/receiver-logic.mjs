@@ -4,7 +4,7 @@
 //   node web/tests/receiver-logic.mjs
 //   LB_FRAMES=<dir of cam_N.i420 + cam_N.json> node web/tests/receiver-logic.mjs    (also replays real camera
 //        frames through the built wasm, web/pkg, and prints the zoom each read would ask for)
-import { FRESH_MS, HINTS, HintHold, COLLAPSED_READS, PhaseSweep, SWEEP, closer, floor, skew, fillOf, toDisplay, parseFormat, ReadTracker, LockWatch, hint, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, fpsBannerText, SENDER_FPS, VersionWatch, VERSION_TEXT, idleHint, ErrorRun, needBytes, spaceShort, stopMessage, SPACE, finishWords, finishParts, FINISH_TEXT, shareHint, SHARE_HINTS, idleShare } from '../receive-logic.js';
+import { FRESH_MS, HINTS, HintHold, COLLAPSED_READS, PhaseSweep, SWEEP, ShortExposure, SHORT, closer, floor, skew, fillOf, toDisplay, parseFormat, ReadTracker, LockWatch, hint, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, fpsBannerText, SENDER_FPS, VersionWatch, VERSION_TEXT, idleHint, ErrorRun, needBytes, spaceShort, stopMessage, SPACE, finishWords, finishParts, FINISH_TEXT, shareHint, SHARE_HINTS, idleShare } from '../receive-logic.js';
 
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
@@ -117,6 +117,10 @@ check(z({ z: 2, corners: sq(2448 * 0.97) }) < 2, `the user came closer (97%): zo
 check(z({ z: 2, corners: sq(1000, 2448 - 520, 3264 / 2) }) < 2, 'a corner at the edge: zoom out before the square leaves the picture');
 check(z({ z: 1, corners: sq(2448 * 0.97) }) === null, 'at the widest view nothing to undo');
 check(z({ z: 3, found: false, lostMs: 2100 }) === 1 && z({ z: 3, found: false, lostMs: 1500 }) === null && z({ z: 1, found: false, lostMs: 9000 }) === null, 'lost for 2 s: back to the widest view (not sooner, not twice)');
+// unread is not gone: frames blurred by the refocus after a zoom-in (or a header that did not read) keep the zoom;
+// only markers missing for 2 s send it back out (it went zoom in, refocus blur, zoom out, zoom in on the phone)
+check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, found: false, lostMs: 4000, goneMs: 1200 }) === null && z({ z: 3, found: false, lostMs: 4000, goneMs: 2100 }) === 1,
+  'no read for 4 s but the markers in view (blur, no header): the zoom stays; markers gone for 2 s: back out');
 {
   // closed loop: the picture's centre stays put, zooming scales the square about it; from a square at 30% of the
   // short side the zoom settles with the square at 70-95% and every corner inside the picture all the way
@@ -450,6 +454,41 @@ if (process.env.LB_FRAMES) {
     const next = zoomStep({ z: 1, caps, corners: s.corners, frame: s.frame, found: !s.last_error, lostMs: 0, sinceChangeMs: 5000 });
     console.log(`     ${f.replace('.json', '')}: ${s.last_error || 'read'} ${s.format || ''} cell ${s.cell_px} px, codewords ${s.codewords_ok}/${s.codewords}, sharpness ${s.sharpness}, fill ${(fill * 100).toFixed(0)}% -> zoom ${next}`);
   }
+}
+
+{ // short exposure for blended captures: the camera's manual exposure tried for 3 s when reads keep blending,
+  // kept when the blend falls (or the codewords rise), reverted otherwise; kept, it lets go when the tile is lost
+  const CAPS = { exposureMode: ['continuous', 'manual'], exposureTime: { min: 0.86, max: 5000, step: 0.1 }, iso: { min: 100, max: 6400, step: 1 } };
+  const feed = (x, { from, to, mix, share = 0.05, found = true, step = 33 }) => { const asks = []; for (let t = from; t <= to; t += step) { const a = x.update({ now: t, newData: found, found, mix, codewordsOk: Math.round(share * 111), codewords: 111 }); if (a) asks.push({ t, ...a }); } return asks; };
+  check(!new ShortExposure({}).supported && !new ShortExposure({ exposureMode: ['continuous'] }).supported, 'no manual exposure (or no ISO range): no short exposure');
+  const none = new ShortExposure({});
+  check(feed(none, { from: 0, to: 6000, mix: 0.5 }).length === 0, 'a camera without it is never asked');
+  const x = new ShortExposure(CAPS);
+  check(x.settings.exposureTime === 25 && x.settings.iso === 3200, `the trial: 2.5 ms at ISO 3200 (${JSON.stringify(x.settings)})`);
+  check(feed(x, { from: 0, to: 4000, mix: 0.05, share: 1 }).length === 0, 'clean reads: no trial');
+  const a = feed(x, { from: 4033, to: 6000, mix: 0.5 });
+  check(a.length === 1 && a[0].apply === 'short' && x.trialing && a[0].t - 4033 >= 1000 && a[0].t - 4033 <= 2000, `1.5 s of blended reads: a trial (${JSON.stringify(a)})`);
+  // the trial reads better: kept, and nothing more is asked while it stays good
+  const b = feed(x, { from: 6033, to: 12000, mix: 0.08, share: 0.9 });
+  check(b.length === 0 && x.kept && x.active, `the blend fell under the trial: kept (${JSON.stringify(b)}, ${x.state})`);
+  // kept, then the tile is lost for 2.5 s (too dark, or the phone moved away): back to automatic
+  const c = feed(x, { from: 12033, to: 16000, mix: 0, found: false });
+  check(c.length === 1 && c[0].apply === 'auto' && !x.active, `kept, then no tile for 2.5 s: automatic again (${JSON.stringify(c)})`);
+  // a trial that reads no better: reverted, and no new trial before the back-off
+  const y = new ShortExposure(CAPS);
+  feed(y, { from: 0, to: 2000, mix: 0.5 });
+  const d = feed(y, { from: 2033, to: 6000, mix: 0.48, share: 0.06 });
+  check(d.length === 1 && d[0].apply === 'auto' && !y.active, `a trial no better: reverted (${JSON.stringify(d)})`);
+  check(feed(y, { from: 6033, to: 20000, mix: 0.5 }).length === 0, 'no new trial inside the back-off');
+  const e = feed(y, { from: 20033, to: 40000, mix: 0.5 });
+  check(e.length >= 1 && e[0].apply === 'short', `after the back-off: another trial (${JSON.stringify(e.slice(0, 2))})`);
+  // three failed trials: off for the session
+  const z = new ShortExposure(CAPS);
+  for (let i = 0; i < 4; i++) feed(z, { from: i * 30000, to: i * 30000 + 29967, mix: 0.5, share: 0.05 });
+  check(!z.supported || z.trials === SHORT.MAX_TRIALS, `trials stop at ${SHORT.MAX_TRIALS} (${z.trials})`);
+  // a camera whose range does not reach the trial settings: clamped into it
+  const w = new ShortExposure({ exposureMode: ['manual'], exposureTime: { min: 40, max: 3000 }, iso: { min: 50, max: 1600 } });
+  check(w.settings.exposureTime === 40 && w.settings.iso === 1600, `clamped to the camera's range (${JSON.stringify(w.settings)})`);
 }
 
 console.log(failed ? `${failed} failed` : 'all passed');

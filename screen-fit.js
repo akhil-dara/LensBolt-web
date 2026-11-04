@@ -39,6 +39,26 @@ export function chooseTile(dpr, w, h, manual = 0) {
   }
 }
 
+/** The speed presets' cell pitches (core calib.rs PRESETS: Reliable 3 px, Fast 2 px, Fastest 1 px, all b/w). */
+export const SPEED_PITCH = { 'sauce-minivan': 3, 'satin-swift': 2, 'sardine-berry': 1 };
+/** The smallest cell a phone's camera reads, in CSS px: on a phone the tile fits only at 1x (a 1024-wide tile on a
+ *  1290 px screen), so the cells are as small as the screen's pixels allow. A phone at dpr 3 at 2 px
+ *  cells: 0.67 CSS px (about 0.11 mm), read at 1.29 camera px from the closest its camera could focus, nothing
+ *  decoded; at 3 px (1 CSS px) 2.1-2.5 camera px, read whole (2026-11-03). */
+export const MIN_CELL_PHONE_CSS = 1.0;
+/** The smallest pitch whose cell is at least MIN_CELL_PHONE_CSS at devicePixelRatio `dpr` and block `s`. */
+export function minPitch(dpr, s) { return Math.max(1, Math.ceil((MIN_CELL_PHONE_CSS * (dpr || 1)) / (s || 1) - 1e-9)); }
+/** The speed to start with here ({ code, note }: Fast, or Reliable with the reason where Fast's cells are under
+ *  the minimum), or, for a speed `chosen`, { code: chosen, warn } where its cells are under it. */
+export function speedFor(dpr, s, chosen = null) {
+  const min = minPitch(dpr, s);
+  if (chosen) {
+    const p = SPEED_PITCH[chosen];
+    return { code: chosen, warn: p && p < min ? `This screen's pixels are tiny: cells this small are too fine for a phone camera to read. Reliable reads.` : '' };
+  }
+  if (SPEED_PITCH['satin-swift'] >= min) return { code: 'satin-swift', note: '' };
+  return { code: 'sauce-minivan', note: "Reliable is chosen: this screen's pixels are tiny, and the faster speeds' cells would be too fine for a phone camera." };
+}
 /** "2880×1800, tile 1024×896 at 2×" (", manual"; " (3× does not fit)"); a screen with no tile as before. */
 export function screenLine(sw, sh, c) {
   const scr = `${Math.round(sw)}×${Math.round(sh)}`;

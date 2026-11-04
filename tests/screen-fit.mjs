@@ -4,7 +4,7 @@
 // measured drawing rate and the rate the sender then sends at. No browser, no wasm.
 //
 //   node web/tests/screen-fit.mjs
-import { autoScale, chooseTile, screenLine, drawRate, sendRate, parseScale } from '../screen-fit.js';
+import { autoScale, chooseTile, screenLine, drawRate, sendRate, parseScale, minPitch, speedFor, SPEED_PITCH } from '../screen-fit.js';
 
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
@@ -108,6 +108,21 @@ check(Math.abs(drawRate(times(120, 121)) - 120) < 0.01, `120 Hz: ${drawRate(time
   check(e.fps === 24 && e.note === 'This screen draws at 24 fps: sending at 24', `30 on a screen at 24: 24 (${JSON.stringify(e)})`);
   check(f.fps === 60 && !f.note, `not measured (a hidden tab): the chosen rate (${JSON.stringify(f)})`);
   check(sendRate(120, 120).fps === 120 && sendRate(15, 60).fps === 15, 'never faster than chosen');
+}
+
+// --- a phone's screen: the tile fits only at 1x and a 2 px cell is under a CSS px (a phone screen 1290 px
+// wide at dpr 3: a 2 px cell 0.11 mm, read at 1.29 camera px from the closest its camera could focus; 3 px read
+// at 2.1-2.5): Reliable to start with, and a warning for a finer speed chosen
+{
+  const phone = chooseTile(3, 1290, 2796);
+  check(phone.s === 1 && minPitch(3, phone.s) === 3, `a phone sender at dpr 3, tile at 1x: cells of at least 3 px (${minPitch(3, phone.s)})`);
+  check(speedFor(3, 1).code === 'sauce-minivan' && speedFor(3, 1).note, `there: Reliable, with the reason (${JSON.stringify(speedFor(3, 1))})`);
+  check(speedFor(3, 1, 'satin-swift').warn && speedFor(3, 1, 'sardine-berry').warn && !speedFor(3, 1, 'sauce-minivan').warn, 'Fast or Fastest chosen there: a warning; Reliable none');
+  const laptop = chooseTile(2, 2880, 1800);
+  check(laptop.s === 2 && minPitch(2, 2) === 1 && speedFor(2, 2).code === 'satin-swift' && !speedFor(2, 2).note && !speedFor(2, 2, 'sardine-berry').warn, 'a Retina laptop (tile at 2x): Fast as before, no note, no warning');
+  check(speedFor(1, 1).code === 'satin-swift' && minPitch(1, 1) === 1, 'a 1x monitor: Fast');
+  check(minPitch(2.625, 1) === 3 && speedFor(2.625, 1).code === 'sauce-minivan', 'an Android phone at dpr 2.625 (tile at 1x): Reliable');
+  check(SPEED_PITCH['sauce-minivan'] === 3 && SPEED_PITCH['satin-swift'] === 2 && SPEED_PITCH['sardine-berry'] === 1, 'the presets\' pitches (core calib.rs PRESETS)');
 }
 
 console.log(failed ? `${failed} failed` : 'all passed');

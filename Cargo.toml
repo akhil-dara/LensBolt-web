@@ -10,7 +10,7 @@ description = "LensBolt sender for the browser (WebAssembly bindings over lensbo
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-lensbolt-core = { git = "https://github.com/akhil-dara/lensbolt-core", tag = "v0.1.3", default-features = false }
+lensbolt-core = { git = "https://github.com/akhil-dara/lensbolt-core", tag = "v0.1.4", default-features = false }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 

@@ -114,6 +114,14 @@
   /* taps on the picture focus (no double-tap zoom, no text selection while the phone is held) */
   #cam { position: fixed; inset: 0; background: #000; color: var(--scrim-fg); overflow: hidden; color-scheme: dark; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
   #cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* where a tap asked the camera to focus: a ring that settles there, green when the camera took the point,
+     amber when it refused, then fades (it never takes a touch) */
+  .focus-ring { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 2px solid rgba(255, 255, 255, 0.92);
+                border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.25); pointer-events: none; opacity: 0;
+                transform: scale(1.35); transition: transform 220ms ease-out, opacity 180ms ease-out, border-color 150ms ease-out; }
+  .focus-ring.on { opacity: 1; transform: scale(1); }
+  .focus-ring.ok { border-color: var(--good); }
+  .focus-ring.no { border-color: var(--warn); }
   .reticle { position: absolute; left: 50%; top: 44%; width: min(78vw, 62vh); aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none;
              color: rgba(255, 255, 255, 0.7); transition: color 200ms ease-out; }
   .reticle svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 3; fill: none; stroke-linecap: round; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
@@ -343,6 +351,7 @@
 
 <section id="cam" hidden data-lock="search" aria-label="Camera">
   <video id="video" playsinline muted autoplay></video>
+  <div class="focus-ring" id="focus-ring" aria-hidden="true"></div>
   <div class="reticle" aria-hidden="true"><svg viewBox="0 0 100 100"><path d="M4 22V8a4 4 0 0 1 4-4h14M78 4h14a4 4 0 0 1 4 4v14M96 78v14a4 4 0 0 1-4 4H78M22 96H8a4 4 0 0 1-4-4V78"/></svg></div>
   <div class="head">
   <div class="top">
@@ -455,7 +464,7 @@ import { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, f
 window.LensBoltBatch = { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, filterCounts, inFilter, visibleRows, splitName, middleFit, freeName, crc32, zipParts, keptInOrder, Announcer, rowPlan, batchNeed, badge, doneState, discardAsk, filterCountsOf };
 </script>
 <script type="module">
-import { ReadTracker, hint, HintHold, toDisplay, floor, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, VersionWatch, PhaseSweep, idleHint, ErrorRun, spaceShort, stopMessage, finishWords, finishParts, FINISH_TEXT, DonateGate, shareHint, idleShare } from './receive-logic.js';
+import { ReadTracker, hint, HintHold, toDisplay, floor, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, VersionWatch, PhaseSweep, ShortExposure, idleHint, ErrorRun, spaceShort, stopMessage, finishWords, finishParts, FINISH_TEXT, DonateGate, shareHint, idleShare } from './receive-logic.js';
 import { readerCount, ReaderPool } from './receive-pool.js';
 import { shaShown, shaSpoken, shaLines } from './sha-text.js';
 const $ = (id) => document.getElementById(id);
@@ -637,7 +646,7 @@ function showCamera() {
   $('d-focus').textContent = `${focus} · ${cam.refocuses} refocus${cam.refocuses === 1 ? '' : 'es'}${cam.focusNote ? ' · ' + cam.focusNote : ''}`;
   // exposureTime is in 100 µs units in the Media Capture spec
   const exp = st.exposureTime != null ? `${(st.exposureTime / 10).toFixed(1)} ms` : '';
-  $('d-exposure').textContent = [exp, st.exposureMode, st.iso != null ? `ISO ${st.iso}` : ''].filter(Boolean).join(' · ') || 'not reported';
+  $('d-exposure').textContent = [exp, st.exposureMode, st.iso != null ? `ISO ${st.iso}` : '', tracker.short && tracker.short.note].filter(Boolean).join(' · ') || 'not reported';
 }
 // the camera opened again on the same lens (the phase search): the stream changes, the receiver and what it has
 // received stay, as for a lens switch
@@ -647,6 +656,8 @@ async function reroll() {
   rerolling = true;
   const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
   cam.sweepNote = `timing: camera restarted (${tracker.sweep.rerolls})`;
+  // the new track starts at its widest: the zoom it had goes back on (else the picture jumped out and back in)
+  cam.keepZoom = cam.zoom;
   try {
     for (const t of stream.getTracks()) t.stop();
     cam.track = null;
@@ -676,7 +687,22 @@ async function setupTrack(track) {
     cam.limits = zoomLimits.get(id);
     cam.limits.set = null; // a zoom set on the previous track says nothing about this one
     if (cam.zoom < cam.limits.base - 1e-6) await constrain({ zoom: cam.limits.base });
+    // a restart for the timing (reroll): the zoom of the track before it, at once
+    if (cam.keepZoom > cam.zoom + 1e-6 && cam.keepZoom <= z.max) { await constrain({ zoom: cam.keepZoom }); cam.zoomAt = performance.now(); }
   }
+  cam.keepZoom = 0;
+  // short exposure (ShortExposure): one per lens; a restart of the same lens (the phase search) keeps it and
+  // puts a short setting it kept or is trying back on the new track
+  if (!tracker.short || tracker.short.lens !== id) { tracker.short = new ShortExposure(cam.caps); tracker.short.lens = id; }
+  else if (tracker.short.active) await applyShort(true);
+}
+// the camera's exposure: the short trial settings (manual), or automatic again
+async function applyShort(on) {
+  const sh = tracker.short;
+  if (!sh || !sh.settings) return;
+  const ok = await constrain(on ? { exposureMode: 'manual', exposureTime: sh.settings.exposureTime, iso: sh.settings.iso } : { exposureMode: 'continuous' });
+  if (ok !== true) sh.note = `exposure refused (${ok})`;
+  showCamera();
 }
 let zooming = false;
 async function applyZoom(z) {
@@ -701,11 +727,12 @@ async function refocus(pt) {
   if (modes.includes('single-shot')) c.focusMode = 'single-shot';
   else if (c.pointsOfInterest && modes.includes('continuous')) c.focusMode = 'continuous';
   // neither a one-shot focus nor a point to focus on: nothing a refocus could change
-  if (!Object.keys(c).length) { cam.focusNote = 'no focus control'; showCamera(); return; }
+  if (!Object.keys(c).length) { cam.focusNote = 'no focus control'; showCamera(); return false; }
   cam.refocuses++;
   const ok = await constrain(c);
   if (ok !== true) cam.focusNote = `refocus refused (${ok})`;
   if (c.focusMode === 'single-shot' && modes.includes('continuous')) setTimeout(() => constrain({ focusMode: 'continuous' }), 1500);
+  return ok === true;
 }
 function tileCentre(s) {
   const c = s.corners, f = s.frame;
@@ -755,15 +782,24 @@ function control(s, r, now) {
   if (cam.limits && cam.limits.update(found, now, s.last_error)) showCamera();
   const zc = zoomCaps();
   const reads = r.codewords > 0 && r.codewordsOk >= r.codewords * 0.9;
+  // the markers gone (not merely unread: a blurred frame or an unread header keeps the square in view)
+  if (found || !/^NoMarkers/.test(s.last_error || '')) cam.goneSince = null; else if (cam.goneSince == null) cam.goneSince = now;
+  const goneMs = cam.goneSince == null ? 0 : now - cam.goneSince;
   let canHelp = false;
   if (zc) {
-    const next = zooming ? null : zoomStep({ z: cam.zoom, caps: zc, corners: s.corners, frame: s.frame, found, lostMs: now - tracker.r.readAt, sinceChangeMs: now - cam.zoomAt, reads });
+    const next = zooming ? null : zoomStep({ z: cam.zoom, caps: zc, corners: s.corners, frame: s.frame, found, lostMs: now - tracker.r.readAt, goneMs, sinceChangeMs: now - cam.zoomAt, reads });
     if (next !== null && Math.abs(next - cam.zoom) > 1e-6) applyZoom(next);
     canHelp = r.fill > 0 && r.fill < ZOOM.START_BELOW && cam.zoom < zc.max - zc.step / 2 && ((next !== null && next > cam.zoom) || zooming || now - cam.zoomAt < ZOOM.SETTLE_MS * 2);
   }
   if (tracker.focus.update({ found, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness || 0, zoom: cam.zoom, format: s.format || null, mix: r.mix, edgePx: r.edgePx, now })) refocus(tileCentre(s));
+  // a fast screen's blend: a short exposure tried, kept only when it reads better
+  if (tracker.short && !rerolling) {
+    const ask = tracker.short.update({ now, newData: r.newData, found, mix: r.mix, codewordsOk: r.codewordsOk, codewords: r.codewords });
+    if (ask) applyShort(ask.apply === 'short');
+  }
   // the screen's timing: the camera is opened again (a new, random capture phase) until the reads come whole
-  if (cam.track && !cam.fast && !rerolling) {
+  // (not while a short exposure is on trial: a restart would judge the trial on another phase)
+  if (cam.track && !cam.fast && !rerolling && !(tracker.short && tracker.short.trialing)) {
     const ask = tracker.sweep.update({ now, newData: r.newData, mix: r.mix, whole: reads, collapsed: r.collapsed, senderFps: s.sender_fps || 0, camFps: cam.fps || 0 });
     if (ask && ask.reroll) reroll();
   }
@@ -1177,8 +1213,20 @@ $('video').addEventListener('click', (e) => {
   const r = v.getBoundingClientRect(), k = Math.max(r.width / v.videoWidth, r.height / v.videoHeight);
   const w = v.videoWidth * k, h = v.videoHeight * k;
   const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h;
-  if (x >= 0 && x <= 1 && y >= 0 && y <= 1) refocus({ x, y });
+  if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return;
+  showFocusRing(e.clientX, e.clientY, refocus({ x, y }));
 });
+// the ring at the tap (screen px): settles, turns green (or amber) when the camera answers, fades after
+let ringTimer = 0;
+function showFocusRing(cx, cy, answer) {
+  const ring = $('focus-ring'), box = $('cam').getBoundingClientRect();
+  clearTimeout(ringTimer);
+  ring.classList.remove('on', 'ok', 'no');
+  ring.style.left = `${cx - box.left}px`; ring.style.top = `${cy - box.top}px`;
+  void ring.offsetWidth; // restart the settle animation on a second tap
+  ring.classList.add('on');
+  Promise.resolve(answer).then((ok) => { ring.classList.add(ok ? 'ok' : 'no'); ringTimer = setTimeout(() => ring.classList.remove('on'), 900); });
+}
 // ---- a batch: the summary, the file list (filters, rows drawn only where they show), each file and Save all ----
 // The worker hands each saved file over as it is saved (an OPFS file of its own, or bytes without OPFS); the list's
 // rows come a page at a time from the worker, for the rows in view (all of them for a filter, at most every 0.7 s).

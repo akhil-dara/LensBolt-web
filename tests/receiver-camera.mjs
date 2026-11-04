@@ -1,11 +1,11 @@
 // The receiver page's camera control in a real browser, with a fake camera and a scripted decoder: the page's own
 // code runs (camera start, Details, zoom, focus, banner, hint, lens switch, wake lock); the decoder worker is
 // replaced by one that answers each frame with a status from a simple optical model (the square grows with the
-// zoom), and the camera track reports zoom 1-10 and focus modes like the OnePlus 12's (its own fake device has
+// zoom), and the camera track reports zoom 1-10 and focus modes like a phone's (its own fake device has
 // none). The decisions themselves are tested in node (receiver-logic.mjs); this checks the page acts on them.
 //
 // The camera's size: the page asks for the Full HD class and ends at 2.5 MP or less, also on a camera that
-// settles larger. Fake cameras of a fixed size (a generated .y4m: 1920x1080, and 2448x3264 like the OnePlus 12's
+// settles larger. Fake cameras of a fixed size (a generated .y4m: 1920x1080, and 2448x3264 like a phone's
 // back camera in portrait), each in a headless Chrome of its own on SIZE_PORT (default CDP_PORT + 7), stopped by
 // its PID; the 2448x3264 one also as a camera that ignores the size asked for (it settles at its 8 MP mode).
 //

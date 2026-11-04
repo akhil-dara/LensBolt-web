@@ -131,7 +131,7 @@ export function toDisplay(corners, frame, rotation) {
 
 // ---- the screen's timing (the browser's PhaseLock) ----
 /** A camera in a browser cannot move its capture timing by a frame as the app does, and on Android Chrome a
- *  frame-rate change on the live track never completes (OnePlus 12, 2026-11-03: applyConstraints hung while the
+ *  frame-rate change on the live track never completes (a phone, 2026-11-03: applyConstraints hung while the
  *  worker read the track). What a page can do is start the camera again: a fresh sensor start lands at a new,
  *  random phase against the screen's frame, and on a panel whose clean window is about half the frame about half
  *  of the starts read whole. So: a second of blended (or collapsed) reads with the rates matching, and the camera
@@ -183,6 +183,86 @@ export class PhaseSweep {
   get fixing() { return !this.off && (this.state === 'sweep' || this.state === 'locked'); }
 }
 
+// ---- short exposure (a fast screen: a phone's OLED) ----
+/** A screen that switches its pixels in well under a millisecond (a phone's OLED) blends two sender frames only
+ *  where the camera's exposure spans the change: with a 10 ms exposure about a third of a close tile reads as a
+ *  mix (a phone filming a phone sender, 2026-11-03: 0-4 of 49 codewords on most captures, "two frames overlap"),
+ *  so every codeword takes damage. A short exposure narrows that band. Android Chrome takes a manual exposure
+ *  and ISO on the live track without stalling it (a frame-rate change does stall), but its automatic mode adds
+ *  gain the manual one does not: 2 ms at ISO 500 read 11x darker than the automatic 10 ms, 2 ms at ISO 3200
+ *  about half as bright, the tile's contrast kept. So: a trial when reads keep blending, kept only when it reads
+ *  better, reverted otherwise (an LCD's own slow settling does not shorten with the exposure: there the phase
+ *  search is the fix, and the trial reads no better and reverts). */
+export const SHORT = {
+  MIX: 0.25,           // the blend share that counts
+  BLENDED: 0.7,        // ... on at least this share of the reads in the watch window
+  WATCH_MS: 1500,      // blended this long, the tile found, starts a trial
+  TRIAL_MS: 3000,      // a trial runs this long before it is judged (the first 500 ms not counted: settling)
+  SETTLE_MS: 500,
+  EXPOSURE: 25,        // the trial's exposure, 100 us units (2.5 ms)
+  ISO: 3200,
+  GAIN_MIX: 0.1,       // kept when the blend falls by this much ...
+  GAIN_SHARE: 0.15,    // ... or the share of codewords read rises by this much
+  FOUND_MIN: 0.5,      // and the tile is still found on at least this share of reads
+  LOST_MS: 2500,       // kept: no tile this long and it lets go (too dark, or the phone moved)
+  BACKOFF_MS: 20000,   // after a trial that read no better
+  MAX_TRIALS: 3,
+};
+export class ShortExposure {
+  /** `caps`: the track's capabilities (exposureMode, exposureTime and iso ranges). */
+  constructor(caps = {}) {
+    const et = caps.exposureTime, iso = caps.iso;
+    this.supported = Array.isArray(caps.exposureMode) && caps.exposureMode.includes('manual') && !!et && !!iso && et.max > et.min && iso.max > iso.min;
+    this.settings = this.supported ? { exposureTime: Math.min(et.max, Math.max(et.min, SHORT.EXPOSURE)), iso: Math.min(iso.max, Math.max(iso.min, SHORT.ISO)) } : null;
+    this.state = 'watch'; this.window = []; this.trials = 0; this.since = -Infinity; this.lastFound = -Infinity; this.baseline = null; this.note = '';
+  }
+  get trialing() { return this.state === 'trial'; }
+  get kept() { return this.state === 'kept'; }
+  /** The camera should run short (re-applied after a camera restart). */
+  get active() { return this.state === 'trial' || this.state === 'kept'; }
+  /** One status: `found` the tile seen in this capture, `newData` a data read with `codewordsOk` of `codewords`,
+   *  `mix` its blend share. Returns { apply: 'short' } or { apply: 'auto' } when the camera should change, else null. */
+  update({ now, newData, found, mix, codewordsOk, codewords }) {
+    if (!this.supported) return null;
+    if (found) this.lastFound = now;
+    this.window.push({ t: now, found: !!found, mix: newData ? mix || 0 : null, share: newData && codewords > 0 ? codewordsOk / codewords : null });
+    while (this.window.length && now - this.window[0].t > SHORT.TRIAL_MS + SHORT.WATCH_MS) this.window.shift();
+    const stats = (from) => {
+      const w = this.window.filter((x) => x.t >= from), d = w.filter((x) => x.mix !== null);
+      const mean = (k) => d.length ? d.reduce((a, x) => a + x[k], 0) / d.length : 0;
+      return { n: w.length, reads: d.length, found: w.length ? w.filter((x) => x.found).length / w.length : 0, mix: mean('mix'), share: mean('share'), blended: d.length ? d.filter((x) => x.mix >= SHORT.MIX).length / d.length : 0 };
+    };
+    switch (this.state) {
+      case 'watch': {
+        if (now < this.since) return null;   // backing off
+        const from = now - SHORT.WATCH_MS, st = stats(from);
+        const spans = this.window.length && this.window[0].t <= from + SHORT.WATCH_MS * 0.3;
+        if (!spans || st.reads < 5 || st.found < SHORT.FOUND_MIN || st.blended < SHORT.BLENDED) return null;
+        if (this.trials >= SHORT.MAX_TRIALS) { this.supported = false; this.note = 'short exposure: no better here'; return null; }
+        this.baseline = st; this.state = 'trial'; this.since = now; this.trials++;
+        this.note = 'short exposure: trying';
+        return { apply: 'short' };
+      }
+      case 'trial': {
+        if (now - this.since < SHORT.TRIAL_MS) return null;
+        const st = stats(this.since + SHORT.SETTLE_MS), b = this.baseline;
+        const better = st.found >= SHORT.FOUND_MIN && st.reads >= 3 && (b.mix - st.mix >= SHORT.GAIN_MIX || st.share - b.share >= SHORT.GAIN_SHARE);
+        if (better) { this.state = 'kept'; this.note = `short exposure: kept (blend ${b.mix.toFixed(2)} -> ${st.mix.toFixed(2)})`; return null; }
+        this.state = 'watch'; this.since = now + SHORT.BACKOFF_MS; this.window.length = 0;
+        this.note = 'short exposure: no better, automatic';
+        return { apply: 'auto' };
+      }
+      case 'kept': {
+        if (now - this.lastFound < SHORT.LOST_MS) return null;
+        this.state = 'watch'; this.since = now + SHORT.BACKOFF_MS; this.window.length = 0;
+        this.note = 'short exposure: tile lost, automatic';
+        return { apply: 'auto' };
+      }
+    }
+    return null;
+  }
+}
+
 /** Clean-looking data reads in a row under a fifth of their codewords before they count as a blend. */
 export const COLLAPSED_READS = 5;
 export class ReadTracker {
@@ -198,7 +278,7 @@ export class ReadTracker {
     this.decoded = s.decoded || 0; this.failed = s.failed || 0;
     const fmt = parseFormat(s.format);
     // data reads in a row that look clean (sharp edges, cells at the floor or above) yet read under a fifth of their
-    // codewords: a blend the measure under-reports (a MacBook panel settles slowly), and a browser cannot move the
+    // codewords: a blend the measure under-reports (a slow LCD panel settles), and a browser cannot move the
     // camera's timing; several in a row before the guidance says so (a straddled capture is one)
     if (newData) {
       const edge = s.edge_px || 0, cw = s.codewords || 0, cell = s.cell_px || 0;
@@ -237,7 +317,7 @@ export function hint(r, zoomCanHelp = false) {
       if (sk > SKEW_HURTS) return HINTS.square;
       // two frames blended: holding steady cannot fix it: reading, locked or not. A read that looks clean (sharp
       // edges, cells above the floor) yet reads under a fifth of its codewords is a blend the measure under-reports
-      // (a MacBook panel settles slowly: 15-25% of the previous frame over the whole tile, 2026-11-03); a browser
+      // (a slow LCD panel settles: 15-25% of the previous frame over the whole tile, 2026-11-03); a browser
       // cannot move the camera's timing, so the sender's rate is the fix here too
       if ((r.mix || 0) >= MIX_SHOWS || r.collapsed) return r.phaseFixing ? HINTS.readingTiming : HINTS.readingOverlap;
       const soft = (r.edgePx || 0) > EDGE_SOFT;
@@ -292,8 +372,8 @@ export const ZOOM = {
  *  (ZoomLimits.caps); `corners`, `frame`: the last data read's square and the picture size (camera px); `found`: a
  *  current read; `lostMs`: since the square was last read; `sinceChangeMs`: since the last zoom change; `reads`:
  *  the codewords read well (>= 90%): then a working transfer is not disturbed (only a corner near the edge zooms
- *  out). */
-export function zoomStep({ z, caps, corners, frame, found, lostMs, sinceChangeMs, reads = false }) {
+ *  out); `goneMs`: since a capture last showed the markers (defaults to `lostMs`). */
+export function zoomStep({ z, caps, corners, frame, found, lostMs, sinceChangeMs, reads = false, goneMs = lostMs }) {
   if (!caps || !(caps.max > caps.min)) return null;
   const step = caps.step > 0 ? caps.step : 0.1;
   const snap = (v, down) => {
@@ -301,7 +381,10 @@ export function zoomStep({ z, caps, corners, frame, found, lostMs, sinceChangeMs
     const n = down ? Math.floor(k + 1e-6) : Math.ceil(k - 1e-6);
     return Math.min(caps.max, Math.max(caps.min, +(caps.min + n * step).toFixed(6)));
   };
-  if (!found) return lostMs >= ZOOM.LOST_MS && z > caps.min + step / 2 ? caps.min : null;
+  // back to the widest view only when the markers themselves are gone (`goneMs`: no marker found for that long);
+  // a frame that is blurred (the camera refocusing after a zoom-in) or reads no header is not a lost square, and
+  // zooming out on it then in again moved the picture up and down
+  if (!found) return Math.min(lostMs, goneMs) >= ZOOM.LOST_MS && z > caps.min + step / 2 ? caps.min : null;
   if (sinceChangeMs < ZOOM.SETTLE_MS) return null;
   const fill = fillOf(corners, frame);
   if (!(fill > 0)) return null;

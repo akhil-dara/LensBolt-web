@@ -196,6 +196,9 @@ check(/id="play-soon"[^>]*>Coming to Google Play</.test(html['/']) && !textFiles
   check(theirs.every(Boolean) && JSON.stringify(ours) === JSON.stringify(theirs), `the landing names the receiver's ways as it does (${ours.join(', ')} / ${theirs.join(', ')})`);
   check(/On an iPhone, open lensbolt\.com\/receive in Safari/.test(html['/']), 'the landing tells iPhone users to use Safari');
   check(/<main\b[\s\S]*id="ways-title"[\s\S]*id="offline-title"[\s\S]*<\/main>/.test(html['/']), 'the landing\'s sections are inside <main>');
+  // search engines' icon crawlers also fetch /favicon.ico: there, at a fixed address, a 192 px icon (a multiple of 48)
+  const ico = fileSet.has('/favicon.ico') ? read('/favicon.ico') : null;
+  check(ico && ico.readUInt16LE(2) === 1 && ico.readUInt16LE(4) === 1 && ico[6] === 192 && ico.subarray(22, 26).toString('latin1') === '\x89PNG', 'the root favicon.ico holds the 192 px icon');
 }
 
 // the service worker

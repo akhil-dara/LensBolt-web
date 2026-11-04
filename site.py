@@ -29,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -513,6 +514,12 @@ def main():
     # search: robots.txt names the sitemap (Cloudflare puts its content-signals notice above it), the sitemap lists
     # the pages, llms.txt describes the site for language-model tools
     write("robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n")
+    # a favicon at the root, at an address that never changes: search engines' icon crawlers look there too (the
+    # pages' icon link names a content-hashed copy). An ICO holding the 192 px PNG as it is (192 = 4 x 48, the
+    # multiple of 48 px Google asks for)
+    png = open(os.path.join(SRC, "assets", "icon-192.png"), "rb").read()
+    ico = struct.pack("<HHH", 0, 1, 1) + struct.pack("<BBBBHHII", 192, 192, 0, 0, 1, 32, len(png), 22) + png
+    open(os.path.join(OUT, "favicon.ico"), "wb").write(ico)
     today = datetime.date.today().isoformat()
     urls = "".join(f"  <url><loc>{SITE_URL}{p}</loc><lastmod>{today}</lastmod></url>\n" for p in ["/", "/send", "/receive", "/downloads/", "/privacy"])
     write("sitemap.xml", f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')

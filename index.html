@@ -319,6 +319,7 @@
         <label class="speed"><input type="radio" name="speed" value="satin-swift" checked><span class="t">Fast <span class="tag">Default</span></span><span class="d">Recent phones. Hold steady, tile filling the view.</span></label>
         <label class="speed"><input type="radio" name="speed" value="sardine-berry"><span class="t">Fastest</span><span class="d">A VM or remote desktop read with the receiver's Share a window, or 4K phone cameras up close.</span></label>
       </div>
+      <p class="help" id="speed-note" aria-live="polite" hidden></p>
     </fieldset>
     <p class="pass" id="pass" aria-live="polite"></p>
     <p class="share-tip" id="share-tip"><svg class="i"><use href="#i-monitor"/></svg><span>Sending from a VM or remote desktop to this computer? Open the <a href="receive.html">receiver</a> here and choose Share a window.</span></p>
@@ -489,6 +490,25 @@ window.LensBoltScreen = { autoScale, chooseTile, screenLine, parseScale, drawRat
     const c = SF().chooseTile(d, sw, sh, manualScale());
     tileW = c.w; tileH = c.h;
     $("screen").textContent = SF().screenLine(sw, sh, c);
+    tileS = c.s;
+    speedNote();
+  }
+  // a phone's screen (the tile only at 1x): Reliable to start with, and a warning when a speed with cells too fine
+  // for a phone camera is chosen (screen-fit.js speedFor); a speed the user picked is never changed
+  let tileS = 1, speedPicked = false;
+  function speedNote() {
+    if (!SF() || !SF().speedFor) return;
+    const d = window.devicePixelRatio || 1, note = $("speed-note");
+    let text = "";
+    if (!speedPicked) {
+      const f = SF().speedFor(d, tileS);
+      const r = document.querySelector(`input[name="speed"][value="${f.code}"]`);
+      // (the page refreshes its estimate when the module is ready and on every change after; not from here, which
+      // runs at load before the rest of the page's state exists)
+      if (r && !r.checked) r.checked = true;
+      text = f.note;
+    } else text = SF().speedFor(d, tileS, speedCode()).warn;
+    note.textContent = text; note.hidden = !text;
   }
   // the display's drawing rate: animation frames over 1 s (a hidden tab draws none: not measured); here at load,
   // for Advanced; while sending, from the countdown's own frames
@@ -801,7 +821,7 @@ window.LensBoltScreen = { autoScale, chooseTile, screenLine, parseScale, drawRat
       $("pass").innerHTML = L().passLine(n.bytes / bps, rows.length);
     } else $("pass").textContent = calib.checked && !code.value.trim() ? "The carousel cycles formats; the phone then shows the calibration words for this distance." : "";
   }
-  document.querySelectorAll('input[name="speed"]').forEach(r => r.onchange = refresh);
+  document.querySelectorAll('input[name="speed"]').forEach(r => r.onchange = () => { speedPicked = true; speedNote(); refresh(); });
   code.oninput = refresh; fpsSel.onchange = refresh; calib.onchange = refresh;
   window.addEventListener("lensbolt-ready", refresh);
 
