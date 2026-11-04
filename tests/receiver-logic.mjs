@@ -275,8 +275,14 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
   const u = run(p, { mix: 0.5, from: 6100, to: 9000 });
   check(u && u.reroll && !p.locked, `locked, then blended again: unlocked and searching (${u && u.t})`);
   const f = new PhaseSweep();
-  const g = run(f, { mix: 0.5, to: 40000 });
-  check(g && g.n === SWEEP.TRIES && f.off && !f.fixing, `a search that never reads whole: ${g && g.n} re-opens, then off (the rate advice shows)`);
+  const g = run(f, { mix: 0.5, to: 30000 });
+  check(g && g.n === SWEEP.TRIES && f.resting && !f.fixing, `a search that never reads whole: ${g && g.n} re-opens, then a rest (the rate advice shows)`);
+  // it never gives up for good: after the rest another search (the camera button, which also re-opens the camera,
+  // read where the page had stopped trying: phone, 2026-11-05)
+  const rest = run(f, { mix: 0.5, from: 30033, to: g.t + SWEEP.REST_MS - 100 });
+  check(rest === null, `no re-open during the rest (${rest && rest.t})`);
+  const again = run(f, { mix: 0.5, from: g.t + SWEEP.REST_MS - 67, to: g.t + SWEEP.REST_MS + 3000 });
+  check(again && again.reroll && f.fixing && !f.resting, `after the rest: searching again (at ${again && again.t - g.t} ms after the last try)`);
   const rb = { fresh: true, failure: null, pitch: 2, bw: true, cellPx: 1.8, edges: [0.9, 0.9, 0.9, 0.9], codewordsOk: 4, codewords: 111, receiving: true, mix: 0.54, edgePx: 1.5, locked: true };
   check(eq(hint({ ...rb, phaseFixing: true }), HINTS.readingTiming) && eq(hint(rb), HINTS.readingOverlap), 'while the page searches the line says it is finding the timing; otherwise the rate advice');
 }

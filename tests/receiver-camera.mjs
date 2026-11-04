@@ -113,7 +113,46 @@ async function page(url, prelude, port = PORT) {
 const text = (id) => `document.getElementById('${id}').textContent`;
 
 {
+  // the default page: no auto zoom (a square at 40% stays as the camera gives it; the guidance asks to come
+  // closer), and a picture that pauses while receiving plays again (the reads wait on its frames)
   const p = await page(`${BASE}/receive.html`, PRELUDE);
+  await p.evaluate(`document.getElementById('go').click(), true`);
+  await sleep(3000);
+  const d = JSON.parse(await p.evaluate(`JSON.stringify({ zooms: window.__applied.filter((a) => a.zoom != null).map((a) => a.zoom), dzoom: ${text('d-zoom')}, guide: ${text('guide')} })`));
+  check(d.zooms.length === 0, `without ?zoom=1 the page never zooms (zoom steps: ${d.zooms.join(', ') || 'none'})`);
+  check(/ · auto off$/.test(d.dzoom), `Details says auto zoom is off (${d.dzoom})`);
+  check(/^Move closer/.test(d.guide), `a small square: the guidance asks to come closer (${d.guide})`);
+  const framesBefore = await p.evaluate(`+(${text('d-frames')}).split(' of ')[1].split(' ')[0]`);
+  await p.evaluate(`document.getElementById('video').pause(), true`);
+  await sleep(1500);
+  const r = JSON.parse(await p.evaluate(`JSON.stringify({ paused: document.getElementById('video').paused, frames: +(${text('d-frames')}).split(' of ')[1].split(' ')[0], dframes: ${text('d-frames')} })`));
+  check(!r.paused && r.frames > framesBefore && /picture resumed 1x/.test(r.dframes), `a paused picture plays again and frames keep coming (${framesBefore} -> ${r.frames}; ${r.dframes})`);
+  check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
+  await p.close();
+}
+
+{
+  // a blended screen on a camera with manual exposure: the default page never darkens it with the short exposure
+  // trial (manual exposure in Chrome is several times darker than auto at the same time x ISO: the picture dimmed
+  // each trial); ?short=1 (lab) still tries it
+  const EXPOSURE = PRELUDE + `;(() => { const T = MediaStreamTrack.prototype, caps = T.getCapabilities;
+    T.getCapabilities = function () { return { ...caps.call(this), exposureMode: ['manual', 'continuous'], exposureTime: { min: 1, max: 1000, step: 1 }, iso: { min: 50, max: 3200, step: 1 } }; };
+    window.__scene.f0 = 0.8; window.__scene.extra = { mix: 0.5 }; })()`;
+  const manual = `JSON.stringify(window.__applied.filter((a) => a.exposureMode === 'manual').length)`;
+  for (const [q, want] of [['', 0], ['?short=1', 1]]) {
+    const p = await page(`${BASE}/receive.html${q}`, EXPOSURE);
+    await p.evaluate(`document.getElementById('go').click(), true`);
+    await sleep(6000);
+    const n = JSON.parse(await p.evaluate(manual));
+    check(want ? n >= 1 : n === 0, `${q || 'the default page'}: ${want ? 'tries' : 'never tries'} the short exposure on a blended screen (manual exposure applied ${n}x)`);
+    check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
+    await p.close();
+  }
+}
+
+{
+  // ?zoom=1 (lab): auto zoom toward a square that fills ~80% of the picture
+  const p = await page(`${BASE}/receive.html?zoom=1`, PRELUDE);
   await p.evaluate(`document.getElementById('go').click(), true`);
   await sleep(1200);
   const early = JSON.parse(await p.evaluate(`JSON.stringify({ cam: !document.getElementById('cam').hidden, guide: ${text('guide')}, applied: window.__applied, wake: window.__wake })`));
@@ -156,8 +195,10 @@ const text = (id) => `document.getElementById('${id}').textContent`;
   const lens = JSON.parse(await p.evaluate(`JSON.stringify({ hidden: document.getElementById('lens').hidden, label: document.getElementById('lens').getAttribute('aria-label'), dlens: ${text('d-lens')} })`));
   check(!lens.hidden && /of 2/.test(lens.label), `with two cameras the switch button shows (${lens.label})`);
   const framesBefore = await p.evaluate(`+(${text('d-frames')}).split(' of ')[1]`);
-  await p.evaluate(`document.getElementById('lens').click(), true`);
+  const frozen = await p.evaluate(`document.getElementById('lens').click(), !document.getElementById('freeze').hidden`);
+  check(frozen === true, `while the other camera opens, the last picture stays on screen (no black: frozen=${frozen})`);
   await sleep(2500);
+  check((await p.evaluate(`document.getElementById('freeze').hidden`)) === true, "the new camera's frames take over from the frozen picture");
   const after = JSON.parse(await p.evaluate(`JSON.stringify({ dlens: ${text('d-lens')}, frames: +(${text('d-frames')}).split(' of ')[1], saved: localStorage.getItem('lb-lens') })`));
   check(after.dlens === 'test lens b' && after.frames > framesBefore && after.saved === 'lens-b', `switching lens: ${lens.dlens} -> ${after.dlens}, frames ${framesBefore} -> ${after.frames}, choice remembered (${after.saved})`);
 

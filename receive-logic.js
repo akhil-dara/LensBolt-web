@@ -141,12 +141,17 @@ export function toDisplay(corners, frame, rotation) {
 export const SWEEP = {
   HIGH_MS: 1000,       // the blend (or collapsed reads) over the last second starts the search
   TRY_MS: 3500,        // after a re-open: the time for the camera to settle and the reads to say whole or not
-  TRIES: 6,            // re-opens in one search before the page gives up
+  TRIES: 6,            // re-opens in one search before the page rests
+  REST_MS: 20000,      // after a search that never read whole: this long from its last re-open to the next search
+                       // (it never gives up for good: the camera button, which re-opens the camera too, read where
+                       // the page had stopped trying; phone, 2026-11-05)
   GAP_MS: 6000,        // between searches
   UNLOCK_MS: 1500,     // locked: the blend up (or reads collapsed) this long unlocks (another search)
 };
 export class PhaseSweep {
-  constructor() { this.state = 'watch'; this.at = -Infinity; this.window = []; this.tries = 0; this.searches = 0; this.rerolls = 0; this.locked = false; this.off = false; this.lastAt = -Infinity; this.since = -Infinity; }
+  constructor() { this.state = 'watch'; this.at = -Infinity; this.window = []; this.tries = 0; this.searches = 0; this.rerolls = 0; this.locked = false; this.off = false; this.lastAt = -Infinity; this.since = -Infinity; this.restUntil = -Infinity; }
+  /** Resting after a search that read nothing whole: the rate advice shows. */
+  get resting() { return this.lastAt < this.restUntil; }
   /** One status. `mix`: the last data read's blend; `whole`: it read 90% of its codewords; `collapsed`: the tracker's
    *  clean-reads-collapsed flag; `senderFps`, `camFps`: the sender's rate and the camera's measured rate. Returns
    *  { reroll: true } when the camera should be opened again now, else null. */
@@ -163,12 +168,12 @@ export class PhaseSweep {
     const reroll = () => { this.tries++; this.rerolls++; this.at = now; this.window.length = 0; this.state = 'sweep'; return { reroll: true }; };
     switch (this.state) {
       case 'watch':
-        if (bad && rates && now - this.at >= SWEEP.GAP_MS) { this.searches++; this.tries = 0; return reroll(); }
+        if (bad && rates && now - this.at >= SWEEP.GAP_MS && now >= this.restUntil) { this.searches++; this.tries = 0; return reroll(); }
         return null;
       case 'sweep':
         if (newData && whole) { this.state = 'locked'; this.locked = true; this.since = -Infinity; this.at = now; return null; }
         if (now - this.at >= SWEEP.TRY_MS) {
-          if (this.tries >= SWEEP.TRIES) { this.off = true; this.state = 'watch'; return null; }
+          if (this.tries >= SWEEP.TRIES) { this.restUntil = this.at + SWEEP.REST_MS; this.state = 'watch'; return null; }
           return reroll();
         }
         return null;

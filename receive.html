@@ -113,7 +113,7 @@
   /* camera */
   /* taps on the picture focus (no double-tap zoom, no text selection while the phone is held) */
   #cam { position: fixed; inset: 0; background: #000; color: var(--scrim-fg); overflow: hidden; color-scheme: dark; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
-  #cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #cam video, #cam #freeze { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   /* where a tap asked the camera to focus: a ring that settles there, green when the camera took the point,
      amber when it refused, then fades (it never takes a touch) */
   .focus-ring { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 2px solid rgba(255, 255, 255, 0.92);
@@ -351,6 +351,7 @@
 
 <section id="cam" hidden data-lock="search" aria-label="Camera">
   <video id="video" playsinline muted autoplay></video>
+  <canvas id="freeze" aria-hidden="true" hidden></canvas>
   <div class="focus-ring" id="focus-ring" aria-hidden="true"></div>
   <div class="reticle" aria-hidden="true"><svg viewBox="0 0 100 100"><path d="M4 22V8a4 4 0 0 1 4-4h14M78 4h14a4 4 0 0 1 4 4v14M96 78v14a4 4 0 0 1-4 4H78M22 96H8a4 4 0 0 1-4-4V78"/></svg></div>
   <div class="head">
@@ -617,9 +618,16 @@ const cam = { track: null, size: {}, refits: 0, caps: {}, settings: {}, zoom: 1,
 const zoomLimits = new Map();
 let lastStatus = null;
 const tracker = { r: new ReadTracker(), focus: new FocusWatch(), banner: new FpsBanner(), version: new VersionWatch(), hold: new HintHold(600), sweep: new PhaseSweep() };
+// auto zoom only with ?zoom=1: many phones have no real zoom (a crop of the same pixels), and where it is real every
+// change refocuses and re-finds the square; around its threshold it zoomed in and out on a square that read well
+// (79-87% of the picture at 1.7 camera px per 2 px cell, the floor 1.45: 0.01 Mbit/s). The decoder reads the
+// picture as the camera gives it; the guidance asks the user to come closer instead.
+const AUTO_ZOOM = params.get('zoom') === '1';
+// the short exposure trial (ShortExposure) likewise only with ?short=1 (see setupTrack)
+const SHORT_TRIAL = params.get('short') === '1';
 function zoomCaps() {
   const z = cam.caps.zoom;
-  return z && z.max > z.min && !cam.zoomNote && cam.limits ? cam.limits.caps() : null;
+  return AUTO_ZOOM && z && z.max > z.min && !cam.zoomNote && cam.limits ? cam.limits.caps() : null;
 }
 function readSettings() {
   if (!cam.track) return;
@@ -651,9 +659,28 @@ function showCamera() {
 // the camera opened again on the same lens (the phase search): the stream changes, the receiver and what it has
 // received stay, as for a lens switch
 let rerolling = false;
+// The last picture held over the video while the camera opens again (a timing restart, another lens): the new
+// camera shows black until its first frame, and a restart every few seconds read as a blank screen (phone,
+// 2026-11-05). Taken down at the new camera's first frame, or after 3 s whatever happens.
+function freeze() {
+  const v = $('video'), c = $('freeze');
+  if (!v.videoWidth || v.style.objectFit === 'contain') return;
+  try { c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); c.hidden = false; } catch (e) { c.hidden = true; return; }
+  const gen = ++freezes, off = () => { if (gen === freezes) c.hidden = true; };
+  setTimeout(off, 3000);
+  return off;
+}
+let freezes = 0;
+// the frozen picture down once the video presents a frame of the new camera
+function thaw(off) {
+  if (!off) return;
+  const v = $('video');
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => off()); else off();
+}
 async function reroll() {
   if (rerolling || !cam.track || !stream) return;
   rerolling = true;
+  const off = freeze();
   const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
   cam.sweepNote = `timing: camera restarted (${tracker.sweep.rerolls})`;
   // the new track starts at its widest: the zoom it had goes back on (else the picture jumped out and back in)
@@ -662,7 +689,8 @@ async function reroll() {
     for (const t of stream.getTracks()) t.stop();
     cam.track = null;
     await useStream(await openCamera(cur));
-  } catch (err) { stopWith('The camera did not start again', `${reason(err)} Tap Start camera.`); }
+    thaw(off);
+  } catch (err) { if (off) off(); stopWith('The camera did not start again', `${reason(err)} Tap Start camera.`); }
   finally { rerolling = false; showCamera(); }
 }
 // one change to the track; its settings are read back whatever happened
@@ -693,7 +721,11 @@ async function setupTrack(track) {
   cam.keepZoom = 0;
   // short exposure (ShortExposure): one per lens; a restart of the same lens (the phase search) keeps it and
   // puts a short setting it kept or is trying back on the new track
-  if (!tracker.short || tracker.short.lens !== id) { tracker.short = new ShortExposure(cam.caps); tracker.short.lens = id; }
+  // only with ?short=1: manual exposure in Chrome is several times darker than auto at the same time x ISO, so each
+  // trial dimmed the picture, and on the phone it read no better (2026-11-05: "no better, automatic"; once "kept"
+  // at 0.01 Mbit/s). The camera restart (PhaseSweep) is what moves a blend here.
+  if (!SHORT_TRIAL) tracker.short = null;
+  else if (!tracker.short || tracker.short.lens !== id) { tracker.short = new ShortExposure(cam.caps); tracker.short.lens = id; }
   else if (tracker.short.active) await applyShort(true);
 }
 // the camera's exposure: the short trial settings (manual), or automatic again
@@ -772,7 +804,21 @@ document.addEventListener('visibilitychange', () => {
   if (running && cam.track) wakeLock(true);
   // a hidden page gets no frames and no answers: the readers' and the collector's time starts again now
   if (pool) { pool.resume(performance.now()); collectorAt = performance.now(); }
+  resumeVideo();
 });
+// The picture paused while receiving: played again. The frame pump waits on the video's frame callbacks, so a
+// paused video stops every read and freezes (or blanks) the preview, and nothing else starts it again (phone,
+// 2026-11-05: the camera track live, the video paused, 0.01 Mbit/s; play() brought the reads straight back).
+// On a pause event, on the page showing again, and once a second as a backstop (a pause with no event).
+let resumes = 0;
+function resumeVideo() {
+  const v = $('video');
+  if (!running || !v.paused || !v.srcObject || document.visibilityState !== 'visible') return;
+  resumes++;
+  v.play().catch(() => {});
+}
+$('video').addEventListener('pause', () => setTimeout(resumeVideo, 0));
+setInterval(resumeVideo, 1000);
 
 // what every status does to the camera: zoom toward a square that fills ~80% of the picture, refocus when it
 // reads badly although its cells are large enough. Returns whether zoom is about to make a small square bigger.
@@ -893,7 +939,7 @@ function render(s) {
   // with reader workers: how many read, each one's decode time, and the camera frames dropped while all were busy
   const pl = s.pool;
   $('d-decode').textContent = s.decode_ms != null ? s.decode_ms.toFixed(0) + ' ms per frame' + (pl ? ` · ${pl.taking < pl.readers ? `${pl.taking} of ` : ''}${pl.readers} reader${pl.readers === 1 ? '' : 's'} (${pl.ms.join(', ')} ms) · ${pl.dropped} of ${pl.offered} dropped: readers busy` : '') : '–';
-  $('d-frames').textContent = `${s.decoded} decoded of ${s.frames}`;
+  $('d-frames').textContent = `${s.decoded} decoded of ${s.frames}${resumes ? ` · picture resumed ${resumes}x` : ''}`;
   $('d-cell').textContent = s.cell_px ? `${s.cell_px.toFixed(2)} camera px (reads from ${floor(r.pitch, r.bw)})` + (r.fill > 0 ? ` · square ${Math.round(r.fill * 100)}% of the picture` : '') : '–';
   $('d-codewords').textContent = s.codewords ? `${s.codewords_ok} of ${s.codewords}` : '–';
   $('d-sharp').textContent = s.sharpness ? (+s.sharpness).toFixed(1) : '–';
@@ -1123,16 +1169,18 @@ async function switchLens() {
   const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
   const next = cam.lenses[(cam.lenses.findIndex((d) => d.deviceId === cur) + 1) % cam.lenses.length];
   $('lens').disabled = true;
+  const off = freeze();
   for (const t of stream.getTracks()) t.stop();
   cam.track = null;
   try {
     await useStream(await openCamera(next.deviceId));
+    thaw(off);
     tracker.hold.reset();
     // the device the track really opened (a fallback may have taken another)
     const opened = cam.track && cam.track.getSettings ? cam.track.getSettings().deviceId : '';
     try { if (opened) localStorage.setItem('lb-lens', opened); } catch (e) {}
     say(`Camera: ${cam.lens || 'switched'}`);
-  } catch (err) { stopWith('The other camera did not start', `${reason(err)} Tap Start camera to use the back camera again.`); }
+  } catch (err) { if (off) off(); stopWith('The other camera did not start', `${reason(err)} Tap Start camera to use the back camera again.`); }
   finally { $('lens').disabled = false; }
 }
 
