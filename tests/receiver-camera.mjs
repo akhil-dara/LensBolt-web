@@ -151,6 +151,47 @@ const text = (id) => `document.getElementById('${id}').textContent`;
 }
 
 {
+  // the browser opens a virtual camera that spans several lenses: the page reads with the main lens instead (the
+  // system swaps lenses inside a virtual one close up), and does not remember it as the user's choice
+  const VIRTUAL = PRELUDE + `;(() => { const md = navigator.mediaDevices, enumerate = md.enumerateDevices.bind(md);
+    const name = (l) => l === 'test lens b' ? 'Back Camera' : 'Back Triple Camera';
+    md.enumerateDevices = async () => (await enumerate()).map((d) => d.kind === 'videoinput' ? { kind: d.kind, deviceId: d.deviceId, groupId: d.groupId, label: name(d.label) } : d);
+    const T = MediaStreamTrack.prototype, label = Object.getOwnPropertyDescriptor(T, 'label').get;
+    Object.defineProperty(T, 'label', { get() { return name(label.call(this)); } }); })()`;
+  const p = await page(`${BASE}/receive.html`, VIRTUAL);
+  await p.evaluate(`document.getElementById('go').click(), true`);
+  await sleep(3000);
+  const v = JSON.parse(await p.evaluate(`JSON.stringify({ lens: ${text('d-lens')}, saved: localStorage.getItem('lb-lens'), frames: +(${text('d-frames')}).split(' of ')[1].split(' ')[0] })`));
+  check(v.lens === 'Back Camera' && v.frames > 0, `a virtual "Back Triple Camera": the page reads with "Back Camera" (${v.lens}, ${v.frames} frames)`);
+  check(v.saved === null, `the main lens is not remembered as the user's pick (${v.saved})`);
+  const btn = await p.evaluate(`document.getElementById('lens').hidden`);
+  check(btn === true, `the button does not offer the virtual camera (one single lens: no button, hidden=${btn})`);
+  check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
+  await p.close();
+}
+
+{
+  // too close for the first lens to focus (big cells, a soft border, codewords failing): the page opens the other lens
+  // on its own, where the square reads, and stays; no timing restart and no refocus while too close
+  const CLOSE = PRELUDE.replace('const ok = cell >= 2.2 ? 111 : 4;', "const near = !track || track.label !== 'test lens b'; const ok = near ? 4 : 111;")
+    .replace('f0: 0.4', 'f0: 0.75').replace('cell = 1.3 * z', 'cell = 3.2 * z')
+    .replace("sharpness: 15, corners: c,", "sharpness: 15, edge_px: near ? 3.4 : 1.5, corners: c,") + `;(() => { const T = MediaStreamTrack.prototype, gs = T.getSettings, gc = T.getCapabilities, b = (t) => t.label === 'test lens b';
+      // as the phone: the first lens pinned at its closest focus (0.13 m), the other focusing down to 0.04 m
+      T.getSettings = function () { return { ...gs.call(this), focusDistance: b(this) ? 0.3 : 0.13 }; };
+      T.getCapabilities = function () { return { ...gc.call(this), focusDistance: { min: b(this) ? 0.04 : 0.13, max: 10, step: 0.01 } }; }; })()`;
+  const p = await page(`${BASE}/receive.html`, CLOSE);
+  await p.evaluate(`document.getElementById('go').click(), true`);
+  await sleep(1200);
+  const g0 = await p.evaluate(text('guide'));
+  await sleep(6000);
+  const v = JSON.parse(await p.evaluate(`JSON.stringify({ lens: ${text('d-lens')}, cw: ${text('d-codewords')}, cam: ${text('d-camera')}, shots: window.__applied.filter((a) => a.focusMode === 'single-shot').length, guide: ${text('guide')} })`));
+  check(v.lens === 'test lens b' && /^111 of 111/.test(v.cw), `too close on the first lens: the page opened the other one by itself and reads there (${v.lens}, ${v.cw}; first said "${g0}")`);
+  check(!/restarted/.test(v.cam) && v.shots === 0, `no timing restart and no refocus while too close (${v.cam}; refocuses ${v.shots})`);
+  check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
+  await p.close();
+}
+
+{
   // ?zoom=1 (lab): auto zoom toward a square that fills ~80% of the picture
   const p = await page(`${BASE}/receive.html?zoom=1`, PRELUDE);
   await p.evaluate(`document.getElementById('go').click(), true`);
@@ -196,11 +237,22 @@ const text = (id) => `document.getElementById('${id}').textContent`;
   check(!lens.hidden && /of 2/.test(lens.label), `with two cameras the switch button shows (${lens.label})`);
   const framesBefore = await p.evaluate(`+(${text('d-frames')}).split(' of ')[1]`);
   const frozen = await p.evaluate(`document.getElementById('lens').click(), !document.getElementById('freeze').hidden`);
+  // the frozen picture is cropped and scaled by the page to what the video shows (a browser that does not apply
+  // object-fit to a canvas drew the whole frame shrunk into a narrow column: phone screen recording, 2026-11-05)
+  const fit = JSON.parse(await p.evaluate(`(() => { const c = document.getElementById('freeze'), v = document.getElementById('video'); return JSON.stringify({ cw: c.width, ch: c.height, bw: Math.round(v.clientWidth * devicePixelRatio), bh: Math.round(v.clientHeight * devicePixelRatio) }); })()`));
+  check(fit.cw === fit.bw && fit.ch === fit.bh, `the frozen picture is drawn at the picture's own size on screen (${fit.cw}x${fit.ch} for a ${fit.bw}x${fit.bh} box)`);
   check(frozen === true, `while the other camera opens, the last picture stays on screen (no black: frozen=${frozen})`);
   await sleep(2500);
   check((await p.evaluate(`document.getElementById('freeze').hidden`)) === true, "the new camera's frames take over from the frozen picture");
   const after = JSON.parse(await p.evaluate(`JSON.stringify({ dlens: ${text('d-lens')}, frames: +(${text('d-frames')}).split(' of ')[1], saved: localStorage.getItem('lb-lens') })`));
-  check(after.dlens === 'test lens b' && after.frames > framesBefore && after.saved === 'lens-b', `switching lens: ${lens.dlens} -> ${after.dlens}, frames ${framesBefore} -> ${after.frames}, choice remembered (${after.saved})`);
+  // not remembered for the next visit: every visit starts on the main lens (a pick made while trying lenses, kept,
+  // started the next transfer on a lens that read worse: phone, 2026-11-05)
+  // the other lens plays in a fresh <video>; the page's listeners still answer it (a pause plays again)
+  const fresh = JSON.parse(await p.evaluate(`(() => { const v = document.getElementById('video'); v.pause(); return JSON.stringify({ n: document.querySelectorAll('#cam video').length }); })()`));
+  await sleep(1500);
+  const resumed = await p.evaluate(`!document.getElementById('video').paused`);
+  check(fresh.n === 1 && resumed === true, `after the switch: one video element, and a pause plays again (${fresh.n} video, playing=${resumed})`);
+  check(after.dlens === 'test lens b' && after.frames > framesBefore && after.saved === null, `switching lens: ${lens.dlens} -> ${after.dlens}, frames ${framesBefore} -> ${after.frames}, not remembered for the next visit (${after.saved})`);
 
   // the square lost for 2 s: back to the widest view
   await p.evaluate(`window.__scene.lost = true, true`);
@@ -213,9 +265,9 @@ const text = (id) => `document.getElementById('${id}').textContent`;
 }
 
 {
-  // blur: the square fills 75% of the picture with 2.6 px cells, yet its codewords do not read: one single-shot
-  // refocus at its centre, no zoom, and never "move closer"
-  const p = await page(`${BASE}/receive.html`, PRELUDE.replace('const ok = cell >= 2.2 ? 111 : 4;', 'const ok = 4;').replace('f0: 0.4', 'f0: 0.75').replace('cell = 1.3 * z', 'cell = 2.6 * z'));
+  // blur: the square fills 75% of the picture with 2.6 px cells and a soft border edge (3.2 camera px), yet its
+  // codewords do not read: one single-shot refocus at its centre, no zoom, and never "move closer"
+  const p = await page(`${BASE}/receive.html`, PRELUDE.replace('const ok = cell >= 2.2 ? 111 : 4;', 'const ok = 4;').replace('f0: 0.4', 'f0: 0.75').replace('cell = 1.3 * z', 'cell = 2.6 * z').replace('extra: {}', 'extra: { edge_px: 3.2 }'));
   await p.evaluate(`document.getElementById('go').click(), true`);
   await sleep(3500);
   const r = JSON.parse(await p.evaluate(`JSON.stringify({ shots: window.__applied.filter((a) => a.focusMode === 'single-shot'), zooms: window.__applied.filter((a) => a.zoom != null).map((a) => a.zoom), guide: ${text('guide')}, dfocus: ${text('d-focus')} })`));

@@ -30,6 +30,9 @@ export const HINTS = {
   readingOverlap: { lock: 'locked', text: 'Reading… two frames overlap in each picture: a slower sender rate helps (20 or 15 fps)' },
   readingTiming: { lock: 'locked', text: "Reading… finding the screen's timing" },
   readingFocus: { lock: 'locked', text: 'Reading… focusing' },
+  // closer than the lens can focus (tooClose): another lens is being tried, or none reads better
+  closeLens: { lock: 'warn', text: 'Too close to focus: trying another lens' },
+  closeBack: { lock: 'warn', text: 'Too close to focus: move the phone back a little' },
   // the tile tracked, not one codeword decoding (so never locked on): reading, not "Hold steady" alone
   readingUnlocked: { lock: 'warn', text: 'Reading…' },
   readingUnlockedFocus: { lock: 'warn', text: 'Reading… focusing' },
@@ -140,13 +143,15 @@ export function toDisplay(corners, frame, rotation) {
  *  rate. Measured: a bad phase read 0 of 111 for a whole run at 07:26. */
 export const SWEEP = {
   HIGH_MS: 1000,       // the blend (or collapsed reads) over the last second starts the search
-  TRY_MS: 3500,        // after a re-open: the time for the camera to settle and the reads to say whole or not
+  TRY_MS: 2500,        // after a re-open: the time for the camera to settle and the reads to say whole or not (a phone's
+                       // camera reopened and read again within 1 s; 3.5 s made each failed try a long stall)
   TRIES: 6,            // re-opens in one search before the page rests
   REST_MS: 20000,      // after a search that never read whole: this long from its last re-open to the next search
                        // (it never gives up for good: the camera button, which re-opens the camera too, read where
                        // the page had stopped trying; phone, 2026-11-05)
   GAP_MS: 6000,        // between searches
-  UNLOCK_MS: 1500,     // locked: the blend up (or reads collapsed) this long unlocks (another search)
+  UNLOCK_MS: 800,      // locked: the blend up (or reads collapsed) this long unlocks (another search; 1.5 s, before,
+                       // made a drift's blend cost ~4 s before the first restart)
 };
 export class PhaseSweep {
   constructor() { this.state = 'watch'; this.at = -Infinity; this.window = []; this.tries = 0; this.searches = 0; this.rerolls = 0; this.locked = false; this.off = false; this.lastAt = -Infinity; this.since = -Infinity; this.restUntil = -Infinity; }
@@ -155,8 +160,11 @@ export class PhaseSweep {
   /** One status. `mix`: the last data read's blend; `whole`: it read 90% of its codewords; `collapsed`: the tracker's
    *  clean-reads-collapsed flag; `senderFps`, `camFps`: the sender's rate and the camera's measured rate. Returns
    *  { reroll: true } when the camera should be opened again now, else null. */
-  update({ now, newData, mix, whole, collapsed, senderFps, camFps }) {
+  update({ now, newData, mix, whole, collapsed, senderFps, camFps, readable = true }) {
     if (this.off) return null;
+    // cells below the size that reads (a format too fine for this camera) look blended whatever the timing: such a
+    // read says nothing about it, and a restart cannot help (27 restarts in 2.5 minutes on a 1 px sender, phone)
+    if (!readable) { newData = false; collapsed = false; }
     const rates = senderFps > 0 && camFps > 0 && Math.abs(senderFps / camFps - 1) <= 0.15;
     if (newData) { this.window.push({ t: now, mix, whole }); this.lastAt = now; }
     while (this.window.length && now - this.window[0].t > SWEEP.HIGH_MS) this.window.shift();
@@ -268,8 +276,10 @@ export class ShortExposure {
   }
 }
 
-/** Clean-looking data reads in a row under a fifth of their codewords before they count as a blend. */
-export const COLLAPSED_READS = 5;
+/** Clean-looking data reads in a row under COLLAPSED_SHARE of their codewords before they count as a blend. A drift
+ *  slides through partial reads before it reads nothing (phone, 2026-11-05: 108, 72, 35, 20, 13 of 111 over 8 s with
+ *  the blend measure at 0.10-0.15; under a fifth, the line before, came 8 s late). */
+export const COLLAPSED_READS = 5, COLLAPSED_SHARE = 0.5;
 export class ReadTracker {
   constructor() { this.lock = new LockWatch(); this.dataReads = 0; this.decoded = 0; this.failed = 0; this.readAt = -Infinity; this.failAt = -Infinity; this.seenAt = -Infinity; this.firstSeenAt = -Infinity; this.progressAt = -Infinity; this.progress = 0; }
   update(s, now) {
@@ -282,13 +292,13 @@ export class ReadTracker {
     if (s.failed > this.failed) this.failAt = now;
     this.decoded = s.decoded || 0; this.failed = s.failed || 0;
     const fmt = parseFormat(s.format);
-    // data reads in a row that look clean (sharp edges, cells at the floor or above) yet read under a fifth of their
+    // data reads in a row that look clean (sharp edges, cells at the floor or above) yet read under half of their
     // codewords: a blend the measure under-reports (a slow LCD panel settles), and a browser cannot move the
     // camera's timing; several in a row before the guidance says so (a straddled capture is one)
     if (newData) {
       const edge = s.edge_px || 0, cw = s.codewords || 0, cell = s.cell_px || 0;
       const clean = edge > 0 && edge <= EDGE_SOFT && fmt && cell >= floor(fmt.pitch, fmt.alphabet === 'bw');
-      this.poorRun = cw > 0 && (s.codewords_ok || 0) * 5 < cw && clean ? (this.poorRun || 0) + 1 : 0;
+      this.poorRun = cw > 0 && (s.codewords_ok || 0) < cw * COLLAPSED_SHARE && clean ? (this.poorRun || 0) + 1 : 0;
     }
     const fresh = now - this.readAt < FRESH_MS;
     if (fresh) { this.seenAt = now; if (this.firstSeenAt === -Infinity) this.firstSeenAt = now; }
@@ -320,6 +330,7 @@ export function hint(r, zoomCanHelp = false) {
       // found, but losing codewords: too small for its format, at an angle, out of focus or moving
       if (r.cellPx > 0 && r.cellPx < floor(r.pitch, r.bw) * CLOSER_OVER_FLOOR) return zoomCanHelp ? HINTS.zooming : closer(r.fill);
       if (sk > SKEW_HURTS) return HINTS.square;
+      if (r.tooClose) return r.lensTrying ? HINTS.closeLens : HINTS.closeBack;
       // two frames blended: holding steady cannot fix it: reading, locked or not. A read that looks clean (sharp
       // edges, cells above the floor) yet reads under a fifth of its codewords is a blend the measure under-reports
       // (a slow LCD panel settles: 15-25% of the previous frame over the whole tile, 2026-11-03); a browser
@@ -477,9 +488,12 @@ export class FocusWatch {
     const reading = codewords <= 0 || codewordsOk >= codewords * READS_WELL;
     // cells where the guidance says "Move closer" (under CLOSER_OVER_FLOOR x the floor) are distance, not focus
     // two sender frames blended with sharp border edges: not focus either
-    const blended = mix >= MIX_SHOWS && !(edgePx > EDGE_SOFT);
-    const misreads = codewords > 0 && codewordsOk < codewords * FOCUS.POOR && cellPx >= floorPx * CLOSER_OVER_FLOOR && !blended;
-    const soft = !reading && sharpness > 0 && this.best > 0 && sharpness < this.best * FOCUS.DROP;
+    // and only a soft border edge is blur: reads failing with sharp edges are a blend (one below the blend line too: a
+    // drift's partial reads), which a refocus cannot mend; each refocus hunts the lens and the picture's scale breathes
+    // with it (24-27 refocuses in a transfer, phone 2026-11-05)
+    const blurred = edgePx > EDGE_SOFT;
+    const misreads = codewords > 0 && codewordsOk < codewords * FOCUS.POOR && cellPx >= floorPx * CLOSER_OVER_FLOOR && blurred;
+    const soft = !reading && blurred && sharpness > 0 && this.best > 0 && sharpness < this.best * FOCUS.DROP;
     if (!(misreads || soft)) { if (reading) this.poorSince = -Infinity; return false; }
     if (this.poorSince === -Infinity) this.poorSince = now;
     if (now - this.poorSince < FOCUS.FOR_MS || now - this.lastAt < FOCUS.COOLDOWN_MS) return false;
@@ -662,4 +676,78 @@ export class DonateGate {
   }
   /** "Don't ask again". */
   never() { this.c.never = true; this.save(); }
+}
+
+// ---- the lens ----
+/** The single lens to read with when the browser opened a virtual camera that spans several lenses (its label says
+ *  Dual or Triple, as "Back Triple Camera"): the system swaps lenses inside a virtual camera on its own when it is
+ *  held close, and each swap changes the picture's scale and focus mid-transfer (measured: 5.2 Mbit/s, then 2.6
+ *  after the swaps, six timing restarts each reopening the same virtual camera). The main lens ("Back Camera") of
+ *  `devices` (enumerateDevices' video inputs), or null: already a single lens, or no main lens listed. */
+export function physicalLens(label, devices) {
+  // Android: the primary back camera is camera 0; Chrome's own pick was the ultrawide (camera 3) on a phone whose
+  // ultrawide read 0-4 of 111 with sharp edges (its distortion bends the grid of a square that fills the view)
+  if (/^camera \d+, facing back$/i.test((label || '').trim())) {
+    return /^camera 0,/i.test(label.trim()) ? null : devices.find((d) => /^camera 0, facing back$/i.test((d.label || '').trim())) || null;
+  }
+  if (!/\b(dual|triple)\b/i.test(label || '')) return null;
+  return devices.find((d) => /^back camera$/i.test((d.label || '').trim())) || null;
+}
+/** The lenses the camera button cycles through: the single ones where the browser lists any (a virtual camera picked
+ *  with the button, and remembered, swapped lenses mid-transfer again), else all of `devices`. */
+export const VIRTUAL_LENS = /\b(dual|triple)\b/i;
+export function singleLenses(devices) {
+  const single = devices.filter((d) => !VIRTUAL_LENS.test(d.label || ''));
+  return single.length ? single : devices;
+}
+
+// ---- too close to focus, and the lens that reads best ----
+/** Too close for this lens to focus: the square in view with a soft border edge while it reads under 90%, and the
+ *  lens at its closest focus where the camera reports focus (`focus`: { at, min } in metres, else null); where it
+ *  does not, cells at twice the floor or more (big and soft: distance, not blur). A main lens held inside its
+ *  closest focus refocused 17-27 times a transfer and read 7 of 111 (phone, 2026-11-05: focus pinned at 0.13 m). */
+export function tooClose(r, focus) {
+  if (!r.fresh || !((r.edgePx || 0) > EDGE_SOFT)) return false;
+  if (r.codewords > 0 && r.codewordsOk >= r.codewords * READS_WELL) return false;
+  if (focus && focus.min > 0 && focus.at != null) return focus.at <= focus.min + 0.01;
+  return r.cellPx >= floor(r.pitch, r.bw) * 2;
+}
+/** Too close for CLOSE_MS: the next lens is tried; it settles for SETTLE_MS, then reads for EVAL_MS; a new lens that
+ *  is no longer too close and reads best is kept; else the next untried, and once all were tried the best seen.
+ *  Then settled for the visit: never back and forth. */
+export const LENS = { CLOSE_MS: 1500, SETTLE_MS: 1000, EVAL_MS: 3000, POOR_MS: 6000, POOR_SHARE: 0.8 };
+export class LensPick {
+  constructor() { this.state = 'watch'; this.closeSince = -Infinity; this.reads = []; this.poorReads = []; this.scores = new Map(); this.done = false; this.at = 0; }
+  get trying() { return this.state === 'trial'; }
+  /** One status: `lenses` the single back lenses' ids (the button's), `current` the open one's, `close` (tooClose),
+   *  `found` the square read now, `whole` that read took 90% of its codewords, `poor` it read at a size that reads
+   *  (cells at the floor or above) yet not whole. Too close for CLOSE_MS, or POOR_SHARE of the reads poor over
+   *  POOR_MS (a lens that cannot read the square: an ultrawide's distortion), tries the next lens. Returns a lens id
+   *  to open now, or null. */
+  update({ now, lenses, current, close, found, whole, poor = false }) {
+    if (this.done || lenses.length < 2) return null;
+    if (found) { this.reads.push({ t: now, whole: !!whole }); this.poorReads.push({ t: now, poor: !!poor }); }
+    while (this.reads.length && now - this.reads[0].t > LENS.EVAL_MS) this.reads.shift();
+    while (this.poorReads.length && now - this.poorReads[0].t > LENS.POOR_MS) this.poorReads.shift();
+    const pr = this.poorReads;
+    const poorLong = pr.length >= 10 && now - pr[0].t >= LENS.POOR_MS * 0.95 && pr.filter((x) => x.poor).length >= pr.length * LENS.POOR_SHARE;
+    const share = () => this.reads.length ? this.reads.filter((x) => x.whole).length / this.reads.length : 0;
+    if (this.state === 'watch') {
+      if (!close) this.closeSince = -Infinity; else if (this.closeSince === -Infinity) this.closeSince = now;
+      if (!(close && now - this.closeSince >= LENS.CLOSE_MS) && !poorLong) return null;
+      this.scores.set(current, share());
+      return this.next(now, lenses);
+    }
+    if (now - this.at < LENS.SETTLE_MS) { this.reads.length = 0; return null; }
+    if (now - this.at < LENS.SETTLE_MS + LENS.EVAL_MS) return null;
+    this.scores.set(current, share());
+    const best = [...this.scores].reduce((a, b) => (b[1] > a[1] ? b : a));
+    if (best[0] === current && !close) { this.settle(); return null; }
+    const nxt = this.next(now, lenses);
+    if (nxt) return nxt;
+    this.settle();
+    return best[0] === current ? null : best[0];
+  }
+  next(now, lenses) { const id = lenses.find((l) => !this.scores.has(l)); if (!id) return null; this.state = 'trial'; this.at = now; this.reads.length = 0; this.poorReads.length = 0; return id; }
+  settle() { this.done = true; this.state = 'watch'; }
 }

@@ -114,6 +114,10 @@
   /* taps on the picture focus (no double-tap zoom, no text selection while the phone is held) */
   #cam { position: fixed; inset: 0; background: #000; color: var(--scrim-fg); overflow: hidden; color-scheme: dark; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
   #cam video, #cam #freeze { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* the held picture fades into the live one (a cut showed any hand movement during the hold as a jump) */
+  #cam #freeze { transition: opacity 200ms ease-out; }
+  #cam #freeze.fading { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { #cam #freeze { transition: none; } }
   /* where a tap asked the camera to focus: a ring that settles there, green when the camera took the point,
      amber when it refused, then fades (it never takes a touch) */
   .focus-ring { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border: 2px solid rgba(255, 255, 255, 0.92);
@@ -465,7 +469,7 @@ import { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, f
 window.LensBoltBatch = { human, count, summaryLive, summaryDone, stateText, rowLabel, FILTERS, filterCounts, inFilter, visibleRows, splitName, middleFit, freeName, crc32, zipParts, keptInOrder, Announcer, rowPlan, batchNeed, badge, doneState, discardAsk, filterCountsOf };
 </script>
 <script type="module">
-import { ReadTracker, hint, HintHold, toDisplay, floor, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, VersionWatch, PhaseSweep, ShortExposure, idleHint, ErrorRun, spaceShort, stopMessage, finishWords, finishParts, FINISH_TEXT, DonateGate, shareHint, idleShare } from './receive-logic.js';
+import { ReadTracker, hint, HintHold, toDisplay, floor, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, VersionWatch, PhaseSweep, ShortExposure, idleHint, ErrorRun, spaceShort, stopMessage, finishWords, finishParts, FINISH_TEXT, DonateGate, shareHint, idleShare, physicalLens, singleLenses, tooClose, LensPick, MIX_SHOWS } from './receive-logic.js';
 import { readerCount, ReaderPool } from './receive-pool.js';
 import { shaShown, shaSpoken, shaLines } from './sha-text.js';
 const $ = (id) => document.getElementById(id);
@@ -617,7 +621,7 @@ const cam = { track: null, size: {}, refits: 0, caps: {}, settings: {}, zoom: 1,
 // auto zoom's limits per lens (deviceId): what one lens learned (a zoom that lost the square) is kept for it
 const zoomLimits = new Map();
 let lastStatus = null;
-const tracker = { r: new ReadTracker(), focus: new FocusWatch(), banner: new FpsBanner(), version: new VersionWatch(), hold: new HintHold(600), sweep: new PhaseSweep() };
+const tracker = { r: new ReadTracker(), focus: new FocusWatch(), banner: new FpsBanner(), version: new VersionWatch(), hold: new HintHold(600), sweep: new PhaseSweep(), lens: new LensPick() };
 // auto zoom only with ?zoom=1: many phones have no real zoom (a crop of the same pixels), and where it is real every
 // change refocuses and re-finds the square; around its threshold it zoomed in and out on a square that read well
 // (79-87% of the picture at 1.7 camera px per 2 px cell, the floor 1.45: 0.01 Mbit/s). The decoder reads the
@@ -625,6 +629,21 @@ const tracker = { r: new ReadTracker(), focus: new FocusWatch(), banner: new Fps
 const AUTO_ZOOM = params.get('zoom') === '1';
 // the short exposure trial (ShortExposure) likewise only with ?short=1 (see setupTrack)
 const SHORT_TRIAL = params.get('short') === '1';
+// ?log=1 (lab): once a second, and at each camera event, what the page sees goes to /log on the page's own server (a
+// phone's browser without a debugger at hand: the lab server writes the lines to a file). Nothing leaves the origin.
+const LAB_LOG = params.get('log') === '1';
+const labEvents = [];
+function labEvent(what) { if (LAB_LOG) labEvents.push({ t: Math.round(performance.now()), what }); }
+// the square's size from read to read: a jump of over 8% between two reads (the picture's scale changed: the camera,
+// or the phone moved), with the time it took
+let labSide = null;
+function labJump(s, now) {
+  const c = s.corners;
+  if (!c) return;
+  const side = Math.hypot(c[2] - c[0], c[3] - c[1]);
+  if (labSide && Math.abs(side / labSide.side - 1) > 0.08) labEvent(`square ${Math.round(labSide.side)} -> ${Math.round(side)} px in ${Math.round(now - labSide.at)} ms (${cam.track ? cam.track.label : '-'})`);
+  labSide = { side, at: now };
+}
 function zoomCaps() {
   const z = cam.caps.zoom;
   return AUTO_ZOOM && z && z.max > z.min && !cam.zoomNote && cam.limits ? cam.limits.caps() : null;
@@ -665,21 +684,39 @@ let rerolling = false;
 function freeze() {
   const v = $('video'), c = $('freeze');
   if (!v.videoWidth || v.style.objectFit === 'contain') return;
-  try { c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); c.hidden = false; } catch (e) { c.hidden = true; return; }
-  const gen = ++freezes, off = () => { if (gen === freezes) c.hidden = true; };
+  // drawn by the page as the video shows it (cover: scaled to fill the box, the overflow cropped evenly), at the box's
+  // own pixel size: a browser that does not apply object-fit to a canvas drew the whole frame shrunk into a narrow
+  // column, a zoom-out at every camera restart (phone screen recording, 2026-11-05)
+  try {
+    const dpr = window.devicePixelRatio || 1, bw = v.clientWidth, bh = v.clientHeight, vw = v.videoWidth, vh = v.videoHeight;
+    const k = Math.max(bw / vw, bh / vh), sw = bw / k, sh = bh / k;
+    c.width = Math.round(bw * dpr); c.height = Math.round(bh * dpr);
+    c.getContext('2d').drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+    c.classList.remove('fading'); c.hidden = false;
+  } catch (e) { c.hidden = true; return; }
+  const gen = ++freezes;
+  const off = () => { if (gen !== freezes || c.hidden || c.classList.contains('fading')) return; c.classList.add('fading'); setTimeout(() => { if (gen === freezes) { c.hidden = true; c.classList.remove('fading'); } }, 220); };
   setTimeout(off, 3000);
   return off;
 }
 let freezes = 0;
-// the frozen picture down once the video presents a frame of the new camera
+// the frozen picture down THAW_MS after the new camera's first frame: a phone's browser drew a newly started camera
+// narrow and zoomed out for its first ~350 ms (10 frames) before drawing it as it is (screen recording, 2026-11-05);
+// the reads go on underneath all the while
+// only where the glitch was seen: WebKit (Safari, and every browser on iOS); elsewhere the hold ends at the
+// new camera's first frame (Android Chrome draws a new camera right away, and the extra hold read as a stall there)
+const WEBKIT = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Android|Edg\//.test(navigator.userAgent) || /iPhone|iPad/.test(navigator.userAgent);
+const THAW_MS = WEBKIT ? 600 : 0;
 function thaw(off) {
   if (!off) return;
   const v = $('video');
-  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => off()); else off();
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => setTimeout(off, THAW_MS)); else setTimeout(off, THAW_MS);
 }
 async function reroll() {
   if (rerolling || !cam.track || !stream) return;
   rerolling = true;
+  labEvent(`timing restart ${tracker.sweep.rerolls} (${cam.track.label})`);
+  cam.lensRestarts = (cam.lensRestarts || 0) + 1;
   const off = freeze();
   const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
   cam.sweepNote = `timing: camera restarted (${tracker.sweep.rerolls})`;
@@ -817,8 +854,18 @@ function resumeVideo() {
   resumes++;
   v.play().catch(() => {});
 }
-$('video').addEventListener('pause', () => setTimeout(resumeVideo, 0));
+// on the camera's container (pause does not bubble: caught as it goes down): a reopened camera gets a fresh <video>
+$('cam').addEventListener('pause', (e) => { if (e.target.id === 'video') setTimeout(resumeVideo, 0); }, true);
 setInterval(resumeVideo, 1000);
+if (LAB_LOG) setInterval(() => {
+  const t = cam.track, st = (() => { try { return t ? t.getSettings() : {}; } catch (e) { return {}; } })(), s = lastStatus || {};
+  const v = $('video'), g = (id) => ($(id) || {}).textContent;
+  const line = { t: Math.round(performance.now()), label: t ? t.label : null, settings: { w: st.width, h: st.height, zoom: st.zoom, fps: st.frameRate, dev: (st.deviceId || '').slice(0, 8) },
+    video: [v.videoWidth, v.videoHeight, v.paused], guide: g('guide'), got: g('got'), rate: g('rate'),
+    s: { cell: s.cell_px, cw: s.codewords_ok, of: s.codewords, mix: s.mix, edge: s.edge_px, err: s.last_error, frames: s.frames, decoded: s.decoded, corners: s.corners, frame: s.frame, sender: s.sender_fps },
+    dec: g('d-decode'), cam: g('d-camera'), focus: g('d-focus'), lab: cam.lab || null, events: labEvents.splice(0) };
+  fetch('/log', { method: 'POST', body: JSON.stringify(line), keepalive: true }).catch(() => {});
+}, 1000);
 
 // what every status does to the camera: zoom toward a square that fills ~80% of the picture, refocus when it
 // reads badly although its cells are large enough. Returns whether zoom is about to make a small square bigger.
@@ -828,6 +875,20 @@ function control(s, r, now) {
   if (cam.limits && cam.limits.update(found, now, s.last_error)) showCamera();
   const zc = zoomCaps();
   const reads = r.codewords > 0 && r.codewordsOk >= r.codewords * 0.9;
+  // closer than this lens focuses (tooClose): another lens tried once (LensPick); no timing restart and no refocus,
+  // neither of which can help (a main lens inside its closest focus: 12 restarts, 17 refocuses, phone 2026-11-05)
+  const fd = cam.caps && cam.caps.focusDistance;
+  r.tooClose = tooClose(r, fd && fd.min > 0 && cam.settings.focusDistance != null ? { at: cam.settings.focusDistance, min: fd.min } : null);
+  if (cam.mode === 'camera' && !rerolling && !lensBusy) {
+    // a read at a size that reads (cells at the floor or above) yet not whole: a lens that cannot read the square. A
+    // blended one counts only once 3 timing restarts on this lens failed to clear it (a drift clears in one or two; an
+    // ultrawide's distortion, read as a blend, did not in six)
+    const poor = found && r.cellPx >= floor(r.pitch, r.bw) && !reads && ((r.mix || 0) < MIX_SHOWS || (cam.lensRestarts || 0) >= 3);
+    const id = tracker.lens.update({ now, lenses: cam.lenses.map((d) => d.deviceId), current: cam.settings.deviceId || '', close: r.tooClose, found, whole: reads, poor });
+    if (id) openLens(id, 'too close to focus');
+  }
+  r.lensTrying = tracker.lens.trying || lensBusy;
+  if (LAB_LOG) cam.lab = { close: r.tooClose, edge: r.edgePx, focusAt: cam.settings.focusDistance, focusMin: fd && fd.min, lens: { state: tracker.lens.state, done: tracker.lens.done, scores: [...tracker.lens.scores].map(([k, v]) => [k.slice(0, 6), Math.round(v * 100)]) } };
   // the markers gone (not merely unread: a blurred frame or an unread header keeps the square in view)
   if (found || !/^NoMarkers/.test(s.last_error || '')) cam.goneSince = null; else if (cam.goneSince == null) cam.goneSince = now;
   const goneMs = cam.goneSince == null ? 0 : now - cam.goneSince;
@@ -837,7 +898,7 @@ function control(s, r, now) {
     if (next !== null && Math.abs(next - cam.zoom) > 1e-6) applyZoom(next);
     canHelp = r.fill > 0 && r.fill < ZOOM.START_BELOW && cam.zoom < zc.max - zc.step / 2 && ((next !== null && next > cam.zoom) || zooming || now - cam.zoomAt < ZOOM.SETTLE_MS * 2);
   }
-  if (tracker.focus.update({ found, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness || 0, zoom: cam.zoom, format: s.format || null, mix: r.mix, edgePx: r.edgePx, now })) refocus(tileCentre(s));
+  if (!r.tooClose && tracker.focus.update({ found, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness || 0, zoom: cam.zoom, format: s.format || null, mix: r.mix, edgePx: r.edgePx, now })) refocus(tileCentre(s));
   // a fast screen's blend: a short exposure tried, kept only when it reads better
   if (tracker.short && !rerolling) {
     const ask = tracker.short.update({ now, newData: r.newData, found, mix: r.mix, codewordsOk: r.codewordsOk, codewords: r.codewords });
@@ -846,7 +907,8 @@ function control(s, r, now) {
   // the screen's timing: the camera is opened again (a new, random capture phase) until the reads come whole
   // (not while a short exposure is on trial: a restart would judge the trial on another phase)
   if (cam.track && !cam.fast && !rerolling && !(tracker.short && tracker.short.trialing)) {
-    const ask = tracker.sweep.update({ now, newData: r.newData, mix: r.mix, whole: reads, collapsed: r.collapsed, senderFps: s.sender_fps || 0, camFps: cam.fps || 0 });
+    const readable = !(r.cellPx > 0 && r.cellPx < floor(r.pitch, r.bw)) && !r.tooClose && !r.lensTrying;
+    const ask = tracker.sweep.update({ now, newData: r.newData, mix: r.mix, whole: reads, collapsed: r.collapsed, senderFps: s.sender_fps || 0, camFps: cam.fps || 0, readable });
     if (ask && ask.reroll) reroll();
   }
   return canHelp;
@@ -896,6 +958,7 @@ function render(s) {
   if (s.have_manifest && s.stream_size && s.storage === 'opfs' && run.peakChecked !== s.disk_peak && running) { run.peakChecked = s.disk_peak; checkSpace(s); }
   const now = performance.now();
   const r = tracker.r.update(s, now);
+  if (LAB_LOG) labJump(s, now);
   lastStatus = s;
   const canHelp = control(s, r, now);
   r.phaseFixing = tracker.sweep.fixing;
@@ -1085,7 +1148,7 @@ async function listLenses() {
   try {
     const all = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
     const back = all.filter((d) => !/front|user/i.test(d.label));
-    cam.lenses = back.length ? back : all;
+    cam.lenses = singleLenses(back.length ? back : all);
   } catch (e) { cam.lenses = []; }
   $('lens').hidden = cam.lenses.length < 2;
   const cur = cam.track && cam.track.getSettings ? cam.track.getSettings().deviceId : '';
@@ -1121,9 +1184,11 @@ async function fitSize(t) {
     try { await t.applyConstraints(size); cam.size = size; return; } catch (e) {}
   }
 }
+// Every visit starts on the browser's back camera (its main lens: singleLens); a lens picked with the button holds for
+// the visit only (a pick made while trying lenses, remembered, started the next transfer on a lens that read worse:
+// 1.55 against 1.9 camera px per cell, phone 2026-11-05). A pick stored by an earlier version is cleared.
 let savedLens = '';
-try { savedLens = localStorage.getItem('lb-lens') || ''; } catch (e) {}
-// the lens chosen last time, else the browser's back camera
+try { localStorage.removeItem('lb-lens'); } catch (e) {}
 async function openCamera(deviceId) {
   let s;
   try { s = await request(deviceId); }
@@ -1142,20 +1207,33 @@ async function openCamera(deviceId) {
 // lands on the screen's frame change (two frames blended: the reader's blend pre-check drops it before the cell
 // read, cheaply) the other is clean. The size stays as fitted (a camera that only does 60 fps smaller keeps 30:
 // `min` refuses a rate the camera cannot hold at this size).
+// once a camera has refused 60 fps on this page, later opens (timing restarts, another lens) do not ask again: each ask
+// and its undo reconfigure the camera, and on a phone that never gave 60 every reconfiguration switched its capture
+// format, the picture's field of view jumping ~16% and the preview drawn narrow (seen at every timing restart)
+let fps60Refused = false;
 async function fastCapture(t) {
-  if (params.get('fps') === '30') return;
+  if (params.get('fps') === '30' || fps60Refused) return true;
   let st = {};
   try { st = t.getSettings ? t.getSettings() : {}; } catch (e) {}
-  if (!(st.width > 0 && st.height > 0)) return;
+  if (!(st.width > 0 && st.height > 0)) return true;
   const size = { width: { ideal: st.width, max: st.width }, height: { ideal: st.height, max: st.height }, frameRate: { ideal: 60, min: 50 } };
-  try { await t.applyConstraints(size); } catch (e) { return; }
+  const fr = (() => { try { return t.getCapabilities ? t.getCapabilities().frameRate : null; } catch (e) { return null; } })();
+  labEvent(`60 fps: asking at ${st.width}x${st.height}, ${st.frameRate} fps now, offered ${JSON.stringify(fr)}`);
+  try { await t.applyConstraints(size); } catch (e) { labEvent(`60 fps refused: ${e && e.name} ${e && (e.constraint || e.message)}`); fps60Refused = true; return false; }
   let after = {};
   try { after = t.getSettings(); } catch (e) {}
-  if (after.width === st.width && after.height === st.height && after.frameRate >= 50) { cam.size = size; cam.fast = true; }
-  else { try { await t.applyConstraints(cam.size); } catch (e) {} }
+  labEvent(`60 fps: after ${after.width}x${after.height} at ${after.frameRate} fps`);
+  if (after.width === st.width && after.height === st.height && after.frameRate >= 50) { cam.size = size; cam.fast = true; return true; }
+  fps60Refused = true;
+  try { await t.applyConstraints(cam.size); } catch (e) {}
+  return false;
 }
 async function useStream(s) {
-  const video = $('video');
+  let video = $('video');
+  // a camera reopened (a timing restart, another lens) plays in a fresh <video>: given the new stream in the old one, a
+  // phone's browser drew it narrow and zoomed out for seconds while the camera and its frames were unchanged (the
+  // element reporting 1080x1920, the decoder seeing the square at the same size: screen recordings, 2026-11-05)
+  if (video.srcObject) { const fresh = video.cloneNode(false); video.srcObject = null; video.replaceWith(fresh); video = fresh; }
   stream = s; video.srcObject = s;
   await video.play().catch(() => {});
   cam.fps = 0; cam.fpsFrames = 0; cam.fpsT0 = 0;
@@ -1168,22 +1246,44 @@ async function switchLens() {
   if (cam.lenses.length < 2 || !cam.track) return;
   const cur = cam.track.getSettings ? cam.track.getSettings().deviceId : '';
   const next = cam.lenses[(cam.lenses.findIndex((d) => d.deviceId === cur) + 1) % cam.lenses.length];
+  tracker.lens.settle(); // the user's pick: the page does not change lens on its own after it
+  await openLens(next.deviceId, 'lens button');
+}
+// opens the lens `deviceId` in place of the open one (the camera button, or LensPick)
+let lensBusy = false;
+async function openLens(deviceId, why) {
+  if (lensBusy || !cam.track || !stream) return;
+  lensBusy = true;
+  const next = cam.lenses.find((d) => d.deviceId === deviceId) || { label: deviceId };
   $('lens').disabled = true;
+  labEvent(`${why}: ${cam.track && cam.track.label} -> ${next.label}`);
   const off = freeze();
   for (const t of stream.getTracks()) t.stop();
   cam.track = null;
   try {
-    await useStream(await openCamera(next.deviceId));
+    await useStream(await openCamera(deviceId));
     thaw(off);
+    cam.lensRestarts = 0;
     tracker.hold.reset();
     // the device the track really opened (a fallback may have taken another)
     const opened = cam.track && cam.track.getSettings ? cam.track.getSettings().deviceId : '';
-    try { if (opened) localStorage.setItem('lb-lens', opened); } catch (e) {}
     say(`Camera: ${cam.lens || 'switched'}`);
   } catch (err) { if (off) off(); stopWith('The other camera did not start', `${reason(err)} Tap Start camera to use the back camera again.`); }
-  finally { $('lens').disabled = false; }
+  finally { $('lens').disabled = false; lensBusy = false; }
 }
 
+// A virtual camera that spans several lenses (physicalLens): the main lens opened instead, before reading starts,
+// also when it was remembered (a pick from before the button offered single lenses only), which is then forgotten.
+async function singleLens(s) {
+  const t = s.getVideoTracks()[0];
+  let lens = null;
+  try { lens = physicalLens(t && t.label, (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')); } catch (e) { return s; }
+  labEvent(`opened ${t && t.label}; single lens: ${lens ? lens.label : 'none'}`);
+  if (!lens || (t.getSettings && t.getSettings().deviceId === lens.deviceId)) return s;
+  if (savedLens) { savedLens = ''; try { localStorage.removeItem('lb-lens'); } catch (e) {} }
+  for (const x of s.getTracks()) x.stop();
+  try { return await openCamera(lens.deviceId); } catch (e) { return openCamera(''); }
+}
 async function start() {
   $('problem').hidden = true;
   if (!window.isSecureContext) return problem('This page needs a secure address', 'Browsers allow the camera only on https:// or localhost. Open lensbolt.com, or serve this file from localhost.');
@@ -1192,6 +1292,7 @@ async function start() {
   let s;
   try {
     s = await openCamera(savedLens);
+    s = await singleLens(s);
   } catch (err) {
     $('go').disabled = false;
     if (err && err.name === 'NotAllowedError') return problem('Camera blocked', 'Allow camera access for this page in the browser settings, then choose the camera again.');
@@ -1255,9 +1356,9 @@ document.documentElement.dataset.ready = 'start';
 $('lens').addEventListener('click', switchLens);
 $('info').addEventListener('click', () => { const on = $('details').hidden; $('details').hidden = !on; $('info').setAttribute('aria-pressed', String(on)); $('info').setAttribute('aria-label', on ? 'Hide details' : 'Show details'); });
 // tap the picture to focus there (the video fills the screen with object-fit: cover: map the tap through the crop)
-$('video').addEventListener('click', (e) => {
+$('cam').addEventListener('click', (e) => {
   const v = $('video');
-  if (!cam.track || !v.videoWidth) return;
+  if (!(e.target === v || e.target.id === 'freeze') || !cam.track || !v.videoWidth) return;
   const r = v.getBoundingClientRect(), k = Math.max(r.width / v.videoWidth, r.height / v.videoHeight);
   const w = v.videoWidth * k, h = v.videoHeight * k;
   const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h;

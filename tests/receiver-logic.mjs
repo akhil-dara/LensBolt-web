@@ -4,7 +4,7 @@
 //   node web/tests/receiver-logic.mjs
 //   LB_FRAMES=<dir of cam_N.i420 + cam_N.json> node web/tests/receiver-logic.mjs    (also replays real camera
 //        frames through the built wasm, web/pkg, and prints the zoom each read would ask for)
-import { FRESH_MS, HINTS, HintHold, COLLAPSED_READS, PhaseSweep, SWEEP, ShortExposure, SHORT, closer, floor, skew, fillOf, toDisplay, parseFormat, ReadTracker, LockWatch, hint, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, fpsBannerText, SENDER_FPS, VersionWatch, VERSION_TEXT, idleHint, ErrorRun, needBytes, spaceShort, stopMessage, SPACE, finishWords, finishParts, FINISH_TEXT, shareHint, SHARE_HINTS, idleShare } from '../receive-logic.js';
+import { FRESH_MS, HINTS, HintHold, COLLAPSED_READS, PhaseSweep, SWEEP, ShortExposure, SHORT, closer, floor, skew, fillOf, toDisplay, parseFormat, ReadTracker, LockWatch, hint, zoomStep, ZOOM, ZoomLimits, FocusWatch, FpsBanner, fpsBannerText, SENDER_FPS, VersionWatch, VERSION_TEXT, idleHint, ErrorRun, needBytes, spaceShort, stopMessage, SPACE, finishWords, finishParts, FINISH_TEXT, shareHint, SHARE_HINTS, idleShare, physicalLens, singleLenses, tooClose, LensPick, LENS } from '../receive-logic.js';
 
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
@@ -149,13 +149,23 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
 // --- focus ---
 {
   const f = new FocusWatch();
-  const st = (o) => ({ found: true, codewordsOk: 5, codewords: 111, cellPx: 2.3, floorPx: 1.8, sharpness: 20, zoom: 1, now: 0, ...o });
+  // edgePx 3: the border's edge soft (focus); the drift blend's sharp edges are below
+  const st = (o) => ({ found: true, codewordsOk: 5, codewords: 111, cellPx: 2.3, floorPx: 1.8, sharpness: 20, zoom: 1, edgePx: 3, now: 0, ...o });
   check(!f.update(st({ now: 0 })) && !f.update(st({ now: 600 })), 'reading badly at a readable cell size: not yet (under 1 s)');
   check(f.update(st({ now: 1100 })), 'reading badly for 1 s with cells large enough: refocus');
   check(!f.update(st({ now: 1300 })) && !f.update(st({ now: 3000 })), '... then a pause (no refocus storm)');
   check(f.update(st({ now: 5200 })) && !f.update(st({ now: 5300 })), '... and again after the pause if it still reads badly');
   const g = new FocusWatch();
   check(!g.update(st({ codewordsOk: 111, now: 0 })) && !g.update(st({ codewordsOk: 111, now: 5000 })), 'reading well: never');
+  // reads failing with sharp border edges (a timing blend below the blend line, a drift): not focus, no refocus (each
+  // refocus hunts the lens, and the picture's scale breathes with it: 24 refocuses in a transfer, phone 2026-11-05)
+  const sharp = new FocusWatch();
+  let sharpN = 0; for (let t = 0; t <= 20000; t += 100) if (sharp.update(st({ codewordsOk: 40, edgePx: 1.6, mix: 0.08, now: t }))) sharpN++;
+  check(sharpN === 0, `reads failing with sharp edges for 20 s: no refocus (${sharpN})`);
+  const sharpDrop = new FocusWatch();
+  sharpDrop.update(st({ codewordsOk: 80, sharpness: 40, edgePx: 1.6, now: 0 }));
+  let dropN = 0; for (let t = 100; t <= 10000; t += 100) if (sharpDrop.update(st({ codewordsOk: 80, sharpness: 20, edgePx: 1.6, now: t }))) dropN++;
+  check(dropN === 0, `sharpness down with sharp border edges: no refocus (${dropN})`);
   const h = new FocusWatch();
   h.update(st({ codewordsOk: 5, cellPx: 1.5, now: 0 }));
   check(!h.update(st({ codewordsOk: 5, cellPx: 1.5, now: 3000 })), 'cells too small for the format: distance, not focus (no refocus)');
@@ -186,7 +196,8 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
 
 // a long run as the page sees it: data reads at 3 of 111, a status without a read now and then (NoHeader), and the
 // manifest once a second (its status keeps the data read's format, codewords and sharpness: core/tests/session.rs;
-// `manifestSharp` models a status that took the manifest's own sharper score, as before that fix)
+// `manifestSharp` models a status that took the manifest's own sharper score, as before that fix; the data's border
+// edge soft (3 camera px), as out of focus)
 {
   const run = (cell, fill, manifestSharp = 15) => {
     const t = new ReadTracker(), hold = new HintHold(600), f = new FocusWatch();
@@ -196,11 +207,11 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
       const now = i * 1000 / 30;
       const miss = i % 7 === 3, manifest = i % 30 === 29;
       if (miss) fail++; else dec++;
-      const s = { frames: i + 1, decoded: dec, failed: fail, last_error: miss ? 'NoHeader' : null, format: '2px bw 1024x1024', cell_px: cell, edges: [cell / 2, cell / 2, cell / 2, cell / 2], codewords_ok: 3, codewords: 111, have_manifest: true, stream_size: 1e6, received_bytes: 0, corners: c, frame: [2000, 1500], sharpness: manifest ? manifestSharp : 15 };
+      const s = { frames: i + 1, decoded: dec, failed: fail, last_error: miss ? 'NoHeader' : null, format: '2px bw 1024x1024', cell_px: cell, edges: [cell / 2, cell / 2, cell / 2, cell / 2], codewords_ok: 3, codewords: 111, have_manifest: true, stream_size: 1e6, received_bytes: 0, corners: c, frame: [2000, 1500], sharpness: manifest ? manifestSharp : 15, edge_px: 3 };
       const r = t.update(s, now);
       const shown = hold.next(hint(r), now);
       if (i > 3) lines.add(shown.text);
-      if (f.update({ found: t.readAt === now, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness, zoom: 1, format: s.format, now })) refocus++;
+      if (f.update({ found: t.readAt === now, codewordsOk: r.codewordsOk, codewords: r.codewords, cellPx: r.cellPx, floorPx: floor(r.pitch, r.bw), sharpness: s.sharpness, zoom: 1, format: s.format, edgePx: r.edgePx, now })) refocus++;
     }
     return { lines: [...lines], refocus };
   };
@@ -209,7 +220,7 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
   check(run(1.4, 0.6, 40).refocus > 0, "(a status carrying the manifest's sharper score would make the data look soft and refocus: why the session keeps the data's)");
   check(a.lines.length === 1 && a.lines[0] === 'Move closer: the square should fill the frame (now 60%)', `3 of 111 at 1.4 px for 3 s, with misses and manifest reads between: always "${a.lines.join('" / "')}"`);
   const b = run(2.3, 0.6);
-  check(b.refocus >= 1 && b.lines.every((l) => l === 'Hold steady' || l === 'Reading…') && b.lines.includes('Reading…'), `3 of 111 at 2.3 px: refocus still fires (${b.refocus} in 3 s) through misses and manifest reads; the tile tracked and codewords decoding: "Reading…" (lines ${b.lines.join(' / ')})`);
+  check(b.refocus >= 1 && b.lines.every((l) => /^(Hold steady|Reading…)/.test(l)) && b.lines.some((l) => l.startsWith('Reading…')), `3 of 111 at 2.3 px, soft: refocus still fires (${b.refocus} in 3 s) through misses and manifest reads; the tile tracked and codewords decoding: "Reading…" (lines ${b.lines.join(' / ')})`);
 }
 
 // --- the lock (the app's LockWatch, GuidanceTest.kt): the tile read without a gap for 0.5 s and a codeword
@@ -260,6 +271,18 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
   check(rc.collapsed && eq(hint(rc), HINTS.readingOverlap), `five in a row: a blend (${hint(rc).text})`);
   rc = tc.update(st(COLLAPSED_READS, 96), 240);
   check(!rc.collapsed, 'a whole read clears it');
+  // a drift slides through partial reads before it reads nothing: under half the codewords with sharp edges counts
+  // (phone, 2026-11-05: 108, 72, 35, 20, 13 of 111 over 8 s, the blend measure 0.10-0.15, the search 8 s late)
+  const driftT = new ReadTracker();
+  let driftR; for (let i = 0; i < COLLAPSED_READS; i++) driftR = driftT.update(st(i, 45), i * 33);
+  check(driftR.collapsed, `five sharp reads at 45 of 96 codewords: the blend shows (${driftR.collapsed})`);
+  const softT = new ReadTracker();
+  const softSt = (i, ok) => ({ ...st(i, ok), edge_px: 3.4 });
+  let softR; for (let i = 0; i < 10; i++) softR = softT.update(softSt(i, 45), i * 33);
+  check(!softR.collapsed, 'the same reads with soft edges (motion, focus): not a blend');
+  const halfT = new ReadTracker();
+  let halfR; for (let i = 0; i < 10; i++) halfR = halfT.update(st(i, 60), i * 33);
+  check(!halfR.collapsed, 'over half the codewords: not counted');
 }
 { // the phase search: a second of blended reads with the rates matching re-opens the camera; a whole read within the
   // try locks; a try that reads nothing is followed by another, six in a search before it gives up; locked and
@@ -283,8 +306,85 @@ check(z({ z: 3, found: false, lostMs: 4000, goneMs: 0 }) === null && z({ z: 3, f
   check(rest === null, `no re-open during the rest (${rest && rest.t})`);
   const again = run(f, { mix: 0.5, from: g.t + SWEEP.REST_MS - 67, to: g.t + SWEEP.REST_MS + 3000 });
   check(again && again.reroll && f.fixing && !f.resting, `after the rest: searching again (at ${again && again.t - g.t} ms after the last try)`);
+  // cells too fine to read (a 1 px sender on a Full HD camera) look blended to the blend measure: no camera restart,
+  // which cannot help (phone, 2026-11-05: 27 restarts in 2.5 minutes on 0.7-1.0 camera px per cell)
+  const fine = new PhaseSweep();
+  let fr = 0; for (let t = 0; t <= 30000; t += 33) if (fine.update({ now: t, newData: true, mix: 0.9, whole: false, collapsed: false, senderFps: 30, camFps: 30, readable: false })) fr++;
+  check(fr === 0 && !fine.fixing, `reads too fine to read: no restart in 30 s (${fr})`);
+  const fineThenOk = run(fine, { mix: 0.5, from: 30033, to: 32000 });
+  check(fineThenOk && fineThenOk.reroll, 'readable cells, blended: the search starts');
   const rb = { fresh: true, failure: null, pitch: 2, bw: true, cellPx: 1.8, edges: [0.9, 0.9, 0.9, 0.9], codewordsOk: 4, codewords: 111, receiving: true, mix: 0.54, edgePx: 1.5, locked: true };
   check(eq(hint({ ...rb, phaseFixing: true }), HINTS.readingTiming) && eq(hint(rb), HINTS.readingOverlap), 'while the page searches the line says it is finding the timing; otherwise the rate advice');
+}
+
+// --- a virtual camera that spans several lenses: the main lens instead (the system swaps lenses inside a virtual one
+// on its own close up: the picture's scale and focus change mid-transfer) ---
+{
+  const devs = [{ deviceId: 't', label: 'Back Triple Camera' }, { deviceId: 'u', label: 'Back Ultra Wide Camera' }, { deviceId: 'm', label: 'Back Camera' }, { deviceId: 'w', label: 'Back Dual Wide Camera' }];
+  check(physicalLens('Back Triple Camera', devs)?.deviceId === 'm', 'a triple virtual camera: the main lens');
+  check(physicalLens('Back Dual Wide Camera', devs)?.deviceId === 'm', 'a dual virtual camera: the main lens');
+  check(physicalLens('Back Camera', devs) === null, 'already the main lens: nothing to change');
+  check(physicalLens('Back Ultra Wide Camera', devs) === null, 'a single lens the user picked: kept');
+  check(physicalLens('camera2 0, facing back', devs) === null, 'a camera with no virtual label: kept');
+  check(physicalLens('Back Triple Camera', devs.filter((d) => d.deviceId !== 'm')) === null, 'no main lens listed: the virtual camera stays');
+  // Android: the primary back camera is camera 0; Chrome's own pick was the ultrawide (camera 3) on a phone whose
+  // ultrawide read 0-4 of 111 with sharp edges (its distortion bends the grid of a square filling the view)
+  const andr = [{ deviceId: 'f', label: 'camera 1, facing front' }, { deviceId: 'u3', label: 'camera 3, facing back' }, { deviceId: 't2', label: 'camera 2, facing back' }, { deviceId: 'm0', label: 'camera 0, facing back' }];
+  check(physicalLens('camera 3, facing back', andr)?.deviceId === 'm0', 'Android: opened on camera 3, the main lens is camera 0');
+  check(physicalLens('camera 0, facing back', andr) === null, 'Android: already on camera 0');
+  check(physicalLens('camera 3, facing back', andr.filter((d) => d.deviceId !== 'm0')) === null, 'Android without a camera 0: kept');
+  // the camera button cycles single lenses only (a virtual one picked by the button, and remembered, swapped lenses
+  // again: phone, 2026-11-05)
+  check(singleLenses(devs).map((d) => d.deviceId).join() === 'u,m', `the button's lenses: the single ones (${singleLenses(devs).map((d) => d.label).join(', ')})`);
+  const onlyVirtual = devs.filter((d) => /dual|triple/i.test(d.label));
+  check(singleLenses(onlyVirtual).length === 2, 'only virtual cameras listed: all of them stay choosable');
+  check(singleLenses([{ deviceId: 'a', label: 'camera2 0, facing back' }, { deviceId: 'b', label: 'camera2 2, facing back' }]).length === 2, 'labels with no virtual cameras: all stay');
+}
+
+// --- too close to focus, and the lens that reads best ---
+{
+  const rr = (o) => ({ fresh: true, pitch: 2, bw: true, cellPx: 3.2, edgePx: 3.4, codewordsOk: 4, codewords: 111, ...o });
+  check(tooClose(rr({}), { at: 0.13, min: 0.13 }), 'soft, reading badly, the lens at its closest focus: too close');
+  check(!tooClose(rr({}), { at: 0.4, min: 0.13 }), 'soft but the lens still has room to focus: not too close (focus, not distance)');
+  check(!tooClose(rr({ edgePx: 1.6 }), { at: 0.13, min: 0.13 }), 'sharp edges: not too close (a blend, not focus)');
+  check(!tooClose(rr({ codewordsOk: 111 }), { at: 0.13, min: 0.13 }), 'reading well: never');
+  check(tooClose(rr({}), null), 'no focus reported: soft with cells at twice the floor or more is too close');
+  check(!tooClose(rr({ cellPx: 2.2 }), null), '... with cells under twice the floor it is not (blur, not distance)');
+
+  const lenses = ['main', 'wide', 'tele'];
+  // the main lens too close for 1.5 s: the next lens; it reads whole after settling: kept, and no more switching
+  const p = new LensPick();
+  let ask = null, t = 0, cur = 'main';
+  const step = (o) => { const a = p.update({ now: t, lenses, current: cur, found: true, ...o }); t += 100; if (a) { ask = a; cur = a; } return a; };
+  for (let i = 0; i < 14; i++) step({ close: true, whole: false });
+  check(ask === null, 'too close for 1.4 s: not yet');
+  for (let i = 0; i < 3; i++) step({ close: true, whole: false });
+  check(ask === 'wide' && p.trying, `too close for 1.5 s: the next single lens (${ask})`);
+  ask = null;
+  for (let i = 0; i < 60; i++) step({ close: false, whole: true });
+  check(ask === null && p.done && cur === 'wide', `the new lens reads whole: kept, settled (${cur}, done ${p.done})`);
+  for (let i = 0; i < 40; i++) step({ close: true, whole: false });
+  check(cur === 'wide', 'settled for the visit: no more switching (no ping-pong)');
+  // every lens worse: back to the one that read best
+  const q = new LensPick();
+  let qc = 'main', qt = 0, seen = [];
+  const qs = (o) => { const a = q.update({ now: qt, lenses, current: qc, found: true, ...o }); qt += 100; if (a) { seen.push(a); qc = a; } };
+  for (let i = 0; i < 40; i++) qs({ close: true, whole: i % 3 === 0 });
+  for (let i = 0; i < 200 && !q.done; i++) qs({ close: true, whole: false });
+  check(q.done && qc === 'main' && seen.join() === 'wide,tele,main', `no lens reads better: each tried once, then back to the best (${seen.join(' -> ')})`);
+  check(new LensPick().update({ now: 0, lenses: ['main'], current: 'main', found: true, close: true, whole: false }) === null, 'one lens: nothing to switch to');
+  // a lens that cannot read the square at a readable size (sharp, big enough, under a fifth whole for 6 s: an
+  // ultrawide's distortion) is changed too, not only one too close to focus
+  const u = new LensPick();
+  let uc = 'main', ut = 0, uask = null;
+  for (let i = 0; i < 80 && !uask; i++) { const a = u.update({ now: ut, lenses, current: uc, found: true, close: false, poor: true, whole: false }); ut += 100; if (a) uask = a; }
+  check(uask === 'wide' && ut >= LENS.POOR_MS * 0.95, `reading under a fifth whole at a readable size for ${ut} ms: the next lens (${uask})`);
+  const ok2 = new LensPick();
+  let okAsk = null; for (let i = 0; i < 100; i++) { const a = ok2.update({ now: i * 100, lenses, current: 'main', found: true, close: false, poor: false, whole: i % 2 === 0 }); if (a) okAsk = a; }
+  check(okAsk === null, 'reading at all (not poor): the lens stays');
+  const r0 = { fresh: true, failure: null, pitch: 2, bw: true, cellPx: 3.2, edges: [1.6, 1.6, 1.6, 1.6], codewordsOk: 4, codewords: 111, receiving: true, mix: 0, edgePx: 3.4, locked: true };
+  check(/move the phone back/i.test(hint({ ...r0, tooClose: true }).text), `too close and no lens left to try: "${hint({ ...r0, tooClose: true }).text}"`);
+  check(/lens/i.test(hint({ ...r0, tooClose: true, lensTrying: true }).text), `while another lens is tried: "${hint({ ...r0, tooClose: true, lensTrying: true }).text}"`);
 }
 
 // --- zoom limits: the starting zoom as the floor (never under 1x: under it may be another lens), at most 3x, and a
