@@ -173,9 +173,11 @@ const text = (id) => `document.getElementById('${id}').textContent`;
 {
   // too close for the first lens to focus (big cells, a soft border, codewords failing): the page opens the other lens
   // on its own, where the square reads, and stays; no timing restart and no refocus while too close
-  const CLOSE = PRELUDE.replace('const ok = cell >= 2.2 ? 111 : 4;', "const near = !track || track.label !== 'test lens b'; const ok = near ? 4 : 111;")
+  const CLOSE = PRELUDE.replace("? 'test lens b' : label.call(this)", "? 'camera 2, facing back' : 'camera 0, facing back'")
+    .replace("label: 'test lens b', groupId: 'b'", "label: 'camera 2, facing back', groupId: 'b'")
+    .replace('const ok = cell >= 2.2 ? 111 : 4;', "const near = !track || track.label !== 'camera 2, facing back'; const ok = near ? 4 : 111;")
     .replace('f0: 0.4', 'f0: 0.75').replace('cell = 1.3 * z', 'cell = 3.2 * z')
-    .replace("sharpness: 15, corners: c,", "sharpness: 15, edge_px: near ? 3.4 : 1.5, corners: c,") + `;(() => { const T = MediaStreamTrack.prototype, gs = T.getSettings, gc = T.getCapabilities, b = (t) => t.label === 'test lens b';
+    .replace("sharpness: 15, corners: c,", "sharpness: 15, edge_px: near ? 3.4 : 1.5, corners: c,") + `;(() => { const T = MediaStreamTrack.prototype, gs = T.getSettings, gc = T.getCapabilities, b = (t) => t.label === 'camera 2, facing back';
       // as the phone: the first lens pinned at its closest focus (0.13 m), the other focusing down to 0.04 m
       T.getSettings = function () { return { ...gs.call(this), focusDistance: b(this) ? 0.3 : 0.13 }; };
       T.getCapabilities = function () { return { ...gc.call(this), focusDistance: { min: b(this) ? 0.04 : 0.13, max: 10, step: 0.01 } }; }; })()`;
@@ -185,8 +187,24 @@ const text = (id) => `document.getElementById('${id}').textContent`;
   const g0 = await p.evaluate(text('guide'));
   await sleep(6000);
   const v = JSON.parse(await p.evaluate(`JSON.stringify({ lens: ${text('d-lens')}, cw: ${text('d-codewords')}, cam: ${text('d-camera')}, shots: window.__applied.filter((a) => a.focusMode === 'single-shot').length, guide: ${text('guide')} })`));
-  check(v.lens === 'test lens b' && /^111 of 111/.test(v.cw), `too close on the first lens: the page opened the other one by itself and reads there (${v.lens}, ${v.cw}; first said "${g0}")`);
+  check(v.lens === 'camera 2, facing back' && /^111 of 111/.test(v.cw), `too close on the first lens: the page opened the other one by itself and reads there (${v.lens}, ${v.cw}; first said "${g0}")`);
   check(!/restarted/.test(v.cam) && v.shots === 0, `no timing restart and no refocus while too close (${v.cam}; refocuses ${v.shots})`);
+  check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
+  await p.close();
+}
+
+{
+  // a computer's webcam and a virtual camera (OBS) listed beside it: the same failing scene never switches the camera
+  // on its own (the lens choice is for a phone's back lenses; webcam mode switched to the virtual camera, 2026-11-07)
+  const WEBCAM = PRELUDE.replace("? 'test lens b' : label.call(this)", "? 'OBS Virtual Camera' : 'HD Webcam (5986:211b)'")
+    .replace("label: 'test lens b', groupId: 'b'", "label: 'OBS Virtual Camera', groupId: 'b'")
+    .replace('const ok = cell >= 2.2 ? 111 : 4;', 'const ok = 4;').replace('f0: 0.4', 'f0: 0.75').replace('cell = 1.3 * z', 'cell = 3.2 * z')
+    .replace("sharpness: 15, corners: c,", "sharpness: 15, edge_px: 3.4, corners: c,");
+  const p = await page(`${BASE}/receive.html`, WEBCAM);
+  await p.evaluate(`document.getElementById('go-webcam').click(), true`);
+  await sleep(9000);
+  const w = JSON.parse(await p.evaluate(`JSON.stringify({ lens: ${text('d-lens')}, btn: !document.getElementById('lens').hidden })`));
+  check(w.lens === 'HD Webcam (5986:211b)', `a webcam reading badly for 9 s stays the webcam, never the virtual camera beside it (${w.lens})`);
   check(p.errors.length === 0, `no page errors (${p.errors.join(' | ')})`);
   await p.close();
 }

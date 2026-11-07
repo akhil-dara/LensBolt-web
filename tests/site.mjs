@@ -203,16 +203,17 @@ check(/id="play-soon"[^>]*>Coming to Google Play</.test(html['/']) && !textFiles
 
 // the service worker
 const registers = (h) => /serviceWorker\.register\(\s*['"]\/sw\.js['"]/.test(h);
-check(registers(html['/send']) && registers(html['/receive']) && ['/', '/privacy', '/downloads/'].every((p) => !registers(html[p])), `the worker is registered from /send and /receive only (${pages.filter((p) => registers(html[p])).join(', ')})`);
+// the landing registers it too: a visit to lensbolt.com alone made nothing work offline (2026-11-07)
+check(['/', '/send', '/receive', '/privacy'].every((p) => registers(html[p])) && !registers(html['/downloads/']), `the worker is registered from /, /send, /receive and /privacy (${pages.filter((p) => registers(html[p])).join(', ')})`);
 function precacheCheck(label) {
   const pagesList = swList('PAGES'), hashed = swList('HASHED');
   const appFiles = files.filter((f) => f.startsWith('/a/'));
-  const icon = files.filter((f) => /^\/i\/icon-192\.[0-9a-f]{10}\.png$/.test(f));
+  const icon = files.filter((f) => /^\/i\//.test(f));
   const want = [...appFiles, ...icon].sort();
-  check(JSON.stringify(pagesList) === '["/receive","/send"]' && JSON.stringify([...hashed].sort()) === JSON.stringify(want) && appFiles.length >= 8 && icon.length === 1,
-    `${label}: the worker precaches /send, /receive, the ${appFiles.length} files under a/ and the app icon (${hashed.length} hashed)`);
+  check(JSON.stringify(pagesList) === '["/","/privacy","/receive","/send"]' && JSON.stringify([...hashed].sort()) === JSON.stringify(want) && appFiles.length >= 8 && icon.length >= 8,
+    `${label}: the worker precaches /, /privacy, /send, /receive, the ${appFiles.length} files under a/ and the ${icon.length} under i/ (${hashed.length} hashed)`);
   const h = createHash('sha256').update(readFileSync(join(SITE, '..', 'web', 'site', 'sw.js'), 'utf8').replace(/\r\n/g, '\n'));
-  for (const u of ['/receive', '/send', ...want].sort()) { h.update(u + '\n'); h.update(read(served(u))); }
+  for (const u of ['/', '/privacy', '/receive', '/send', ...want].sort()) { h.update(u + '\n'); h.update(read(served(u))); }
   check(swVersion() === h.digest('hex').slice(0, 16), `${label}: the worker's version is the hash of its code and the files it precaches (${swVersion()})`);
   check(appFiles.every((f) => /\.[0-9a-f]{10}\.\w+$/.test(f) && sha256(read(f)).startsWith(f.match(/\.([0-9a-f]{10})\.\w+$/)[1])), `${label}: every a/ name carries its bytes' hash`);
   return { appFiles, want };
@@ -360,7 +361,7 @@ for (const [dpr, w, hgt, s, th] of [[2, 2880, 1800, 2, 896], [1.25, 1920, 1080, 
       check(/\/manifest\.webmanifest$/.test(man.url) && (man.errors || []).length === 0, `desktop /send links the manifest (${man.url}; errors ${JSON.stringify(man.errors)})`);
       const ready = await until(b, SW_READY, 20000);
       const cached = JSON.parse(await b.evaluate(`(async () => { const k = (await caches.keys()).find((k) => k.startsWith('lensbolt-')); if (!k) return '[]'; const c = await caches.open(k); return JSON.stringify((await c.keys()).map((r) => new URL(r.url).pathname)); })()`) || '[]');
-      const want = ['/receive', '/send', ...swList('HASHED')].sort();
+      const want = [...swList('PAGES'), ...swList('HASHED')].sort();
       check(ready && JSON.stringify([...cached].sort()) === JSON.stringify(want), `the service worker is active and its cache holds the precache list (${cached.length} of ${want.length})`);
       await stopServer();
       b.errors.length = 0;
@@ -369,6 +370,8 @@ for (const [dpr, w, hgt, s, th] of [[2, 2880, 1800, 2, 896], [1.25, 1920, 1080, 
       check(await until(b, `${sendReady} && !!navigator.serviceWorker.controller`), '/send works offline after a reload (the server stopped)');
       await b.go(`${ORIGIN}/receive`);
       check(await until(b, `!!document.getElementById('go') && typeof window.lensboltWorker === 'function'`), '/receive loads offline too');
+      await b.go(`${ORIGIN}/`);
+      check(await until(b, `!!document.getElementById('ways-title') && [...document.images].every((i) => i.complete && i.naturalWidth > 0)`), 'the landing loads offline too, its images with it');
       check(b.errors.length === 0, `offline: no page errors (${b.errors.join(' | ')})`);
       await startServer(sitePort);
     }

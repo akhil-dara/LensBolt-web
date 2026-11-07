@@ -879,7 +879,10 @@ function control(s, r, now) {
   // neither of which can help (a main lens inside its closest focus: 12 restarts, 17 refocuses, phone 2026-11-05)
   const fd = cam.caps && cam.caps.focusDistance;
   r.tooClose = tooClose(r, fd && fd.min > 0 && cam.settings.focusDistance != null ? { at: cam.settings.focusDistance, min: fd.min } : null);
-  if (cam.mode === 'camera' && !rerolling && !lensBusy) {
+  // a phone's back lenses only ("camera N, facing back", "Back …"): a computer's webcam beside a virtual camera (OBS)
+  // was switched to the virtual one when it read badly (2026-11-07)
+  const phone = cam.lenses.some((d) => /facing back|^back\b/i.test(d.label || ''));
+  if (cam.mode === 'camera' && phone && !rerolling && !lensBusy) {
     // a read at a size that reads (cells at the floor or above) yet not whole: a lens that cannot read the square. A
     // blended one counts only once 3 timing restarts on this lens failed to clear it (a drift clears in one or two; an
     // ultrawide's distortion, read as a blend, did not in six)

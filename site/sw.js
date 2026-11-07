@@ -1,5 +1,6 @@
-// LensBolt's service worker, written by web/site.py. It keeps /send, /receive and the files they load (site/a/,
-// and the app icon: each named by its content hash) so both pages open with no connection after the first visit.
+// LensBolt's service worker, written by web/site.py. It keeps the landing (/), /privacy, /send, /receive and the
+// files they load (site/a/ and site/i/: each named by its content hash) so every page opens with no connection
+// after the first visit to any of them.
 //
 // The version is a hash of every file below and of this code, so any change to a page, a file or the worker makes
 // a new worker with a new cache. A page always comes from the network when there is one; offline it comes from

@@ -485,11 +485,14 @@ def main():
       <a class="opt" href="https://github.com/akhil-dara/lensbolt-android/releases/latest" rel="noopener">Download the APK from GitHub Releases</a>
       <small>Until then, receive in the phone's browser at lensbolt.com/receive.</small>
     </div>"""
-    write("index.html", site_page("index.html", {"android": android, "jsonld": json_ld(social), **{f"size:{s}": sizes[s] for s in SINGLE}}))
+    # the landing and the privacy page register the worker too: a visit to lensbolt.com alone left nothing working
+    # offline (2026-11-07); their only script, allowed by its hash
+    registered = lambda doc: doc.replace("</head>", REGISTER + "\n</head>", 1)
+    write("index.html", registered(site_page("index.html", {"android": android, "jsonld": json_ld(social), **{f"size:{s}": sizes[s] for s in SINGLE}})))
 
     privacy_md = read(os.path.join(ROOT, "PRIVACY.md"))
     privacy_md = privacy_md.replace("\n## Changes", "\n" + SITE_PRIVACY + "\n## Changes", 1) if "\n## Changes" in privacy_md else privacy_md + "\n" + SITE_PRIVACY
-    write("privacy.html", site_page("page.html", {"title": SEO["/privacy"][0], "description": SEO["/privacy"][1], "head": seo_head("/privacy", *SEO["/privacy"], social), "body": markdown(privacy_md)}))
+    write("privacy.html", registered(site_page("page.html", {"title": SEO["/privacy"][0], "description": SEO["/privacy"][1], "head": seo_head("/privacy", *SEO["/privacy"], social), "body": markdown(privacy_md)})))
 
     rows = []
     for s, what, note in [("lensbolt.html", "The sender", "Shows your files on this screen for a camera to read."),
@@ -533,36 +536,40 @@ def main():
         "icons": [{"src": icon192, "sizes": "192x192", "type": "image/png"}, {"src": icon512, "sizes": "512x512", "type": "image/png"}],
     }, indent=2) + "\n")
 
-    # the service worker: the two pages, every file under a/ and the app icon (the banner's and the home screen's),
-    # versioned by their hash and by the worker's own code
-    hashed = sorted([rel_out(os.path.join(OUT, "a", f)) for f in os.listdir(os.path.join(OUT, "a"))] + [icon192])
-    precache = sorted(["/send", "/receive"] + hashed)
+    # the service worker: the landing, the privacy page and the two apps, every file under a/ and under i/ (the
+    # landing's styles and pictures, the icons: 276 KB), versioned by their hash and by the worker's own code
+    sw_pages = ["/", "/privacy", "/receive", "/send"]
+    hashed = sorted([rel_out(os.path.join(OUT, d, f)) for d in ("a", "i") for f in os.listdir(os.path.join(OUT, d))])
+    precache = sorted(sw_pages + hashed)
     template = read(os.path.join(SRC, "sw.js"))
     h = hashlib.sha256(template.encode("utf-8"))
     for u in precache:
         h.update((u + "\n").encode())
         h.update(open(os.path.join(OUT, PAGES_ON_DISK.get(u, u.lstrip("/"))), "rb").read())
     version = h.hexdigest()[:16]
-    write("sw.js", template.replace("{{version}}", version).replace("{{pages}}", json.dumps(["/receive", "/send"])).replace("{{hashed}}", json.dumps(hashed)))
+    write("sw.js", template.replace("{{version}}", version).replace("{{pages}}", json.dumps(sw_pages)).replace("{{hashed}}", json.dumps(hashed)))
 
     # _headers: one Cache-Control and one CSP per path (Pages joins a header named by several matching rules)
     common = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
     site_csp = f"{common}; img-src 'self'; style-src 'self'; form-action 'none'"
+    # the landing and the privacy page: their one script (the worker's registration) and the worker
+    reg_csp = f"{site_csp}; script-src {hashes(inline_scripts(REGISTER))}; worker-src 'self'"
 
     def app_csp(doc):
         return (f"{common}; script-src 'self' 'wasm-unsafe-eval' {hashes(inline_scripts(doc))}; style-src 'self' {hashes(inline_styles(doc))}; img-src 'self' blob:; "
                 "media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'")
     for name in ("index.html", "privacy.html", "downloads/index.html", "404.html"):
         doc = read(os.path.join(OUT, name))
-        assert not inline_scripts(doc) and not inline_styles(doc) and not re.search(r'\sstyle="', doc), f"{name} has inline script or style: its CSP allows none"
+        allowed = inline_scripts(REGISTER) if name in ("index.html", "privacy.html") else []
+        assert inline_scripts(doc) == allowed and not inline_styles(doc) and not re.search(r'\sstyle="', doc), f"{name}: an inline script or style its CSP does not allow"
     rules = [
         ("/*", {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
                 "Permissions-Policy": "camera=(self), display-capture=(self), microphone=(), geolocation=(), payment=(), usb=()",
                 "Strict-Transport-Security": "max-age=31536000"}),
-        ("/", {"Cache-Control": "no-store", "Content-Security-Policy": site_csp}),
+        ("/", {"Cache-Control": "no-store", "Content-Security-Policy": reg_csp}),
         ("/send", {"Cache-Control": "no-store", "Content-Security-Policy": app_csp(send)}),
         ("/receive", {"Cache-Control": "no-store", "Content-Security-Policy": app_csp(receive)}),
-        ("/privacy", {"Cache-Control": "no-store", "Content-Security-Policy": site_csp}),
+        ("/privacy", {"Cache-Control": "no-store", "Content-Security-Policy": reg_csp}),
         ("/downloads/", {"Cache-Control": "no-store", "Content-Security-Policy": site_csp}),
         ("/downloads/:file", {"Cache-Control": "no-store"}),
         ("/sw.js", {"Cache-Control": "no-store"}),
